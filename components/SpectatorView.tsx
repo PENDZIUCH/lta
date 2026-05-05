@@ -1,4 +1,3 @@
-// components/SpectatorView.tsx
 'use client';
 
 import { useWebRTC } from '@/lib/useWebRTC';
@@ -11,7 +10,9 @@ export function SpectatorView({ broadcastId }: { broadcastId: string }) {
 
   useEffect(() => {
     if (remoteStream && videoRef.current) {
+      console.log('🎥 Asignando stream al video element');
       videoRef.current.srcObject = remoteStream;
+      videoRef.current.play().catch(e => console.error('Error play:', e));
     }
   }, [remoteStream]);
 
@@ -27,14 +28,14 @@ export function SpectatorView({ broadcastId }: { broadcastId: string }) {
         )}
 
         <div className="bg-gray-900 rounded-lg overflow-hidden mb-4">
-          {connected && remoteStream ? (
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              className="w-full h-auto bg-black"
-            />
-          ) : (
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            className="w-full h-auto bg-black"
+            style={{ display: remoteStream ? 'block' : 'none' }}
+          />
+          {!remoteStream && (
             <div className="w-full aspect-video bg-gray-800 flex items-center justify-center text-white">
               {connected ? '⏳ Cargando stream...' : '🔄 Conectando...'}
             </div>
