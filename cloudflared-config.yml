@@ -1,0 +1,12 @@
+tunnel: 097914aa-34c9-49eb-b580-305382c36966
+credentials-file: C:\Users\Hugo Pendziuch\.cloudflared\097914aa-34c9-49eb-b580-305382c36966.json
+loglevel: info
+
+ingress:
+  - hostname: lta.pendziuch.com
+    service: http://127.0.0.1:3000
+    originRequest:
+      noTLSVerify: true
+      connectTimeout: 30s
+      http2Origin: false
+  - service: http_status:404
