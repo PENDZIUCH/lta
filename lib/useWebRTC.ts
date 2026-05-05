@@ -12,26 +12,30 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
   const [connected, setConnected] = useState(false);
 
   const peerRef = useRef<any>(null);
-  const signalQueueRef = useRef<any[]>([]);
-  const peerReadyRef = useRef(false);
+  const signalQueueRef = useRef<any[]>([]); // Cola de signals mientras el peer no está listo
   const { sendSignal, onSignal, isConnected: socketConnected } = useSignaling(broadcastId, isBroadcaster);
 
-  // 1. Obtener cámara (broadcaster)
   useEffect(() => {
     if (!isBroadcaster) return;
-    navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-      audio: true,
-    }).then(mediaStream => {
-      console.log('✅ Cámara obtenida');
-      setStream(mediaStream);
-    }).catch(err => setError(`Error cámara: ${err}`));
+    async function getLocalStream() {
+      try {
+        console.log('📹 Pidiendo cámara...');
+        const mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: true,
+        });
+        console.log('✅ Cámara obtenida');
+        setStream(mediaStream);
+      } catch (err) {
+        setError(`Error: ${err}`);
+      }
+    }
+    getLocalStream();
   }, [isBroadcaster]);
 
-  // 2. Crear peer cuando WebSocket conecta
   useEffect(() => {
     if (!socketConnected) return;
-    if (isBroadcaster && !stream) return;
+    if (!stream && isBroadcaster) return;
 
     async function initPeer() {
       console.log('🚀 Obteniendo TURN credentials...');
@@ -45,7 +49,7 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
       });
 
       peer.on('signal', (data: any) => {
-        console.log('📡 Signal out:', data.type || 'candidate');
+        console.log('📡 Signal:', data.type || 'candidate');
         sendSignal(data);
       });
 
@@ -55,63 +59,58 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
       });
 
       peer.on('stream', (remoteMediaStream: MediaStream) => {
-        console.log('🎥 Stream recibido!');
+        console.log('🎥 Stream recibido');
         setRemoteStream(remoteMediaStream);
       });
 
       peer.on('error', (err: any) => {
-        if (!err.message?.includes('wrong state')) {
-          console.error('❌ Error:', err.message);
-          setError(err.message);
+        console.error('❌ WebRTC Error:', err.message);
+        if (!err.message.includes('wrong state')) {
+          setError(`Error: ${err.message}`);
         }
       });
 
       peer.on('close', () => setConnected(false));
 
       peerRef.current = peer;
-      peerReadyRef.current = true;
 
-      // Procesar signals encolados
+      // Procesar signals que llegaron antes de que el peer estuviera listo
       if (signalQueueRef.current.length > 0) {
         console.log(`📬 Procesando ${signalQueueRef.current.length} signals encolados`);
-        const queue = [...signalQueueRef.current];
-        signalQueueRef.current = [];
-        for (const signal of queue) {
+        for (const signal of signalQueueRef.current) {
           try {
-            console.log('➡️ Signal encolado al peer:', signal.type || 'candidate');
             peer.signal(signal);
-          } catch (e: any) {
-            if (!e.message?.includes('wrong state')) console.error(e.message);
+          } catch (err: any) {
+            console.error('❌ Error signal encolado:', err.message);
           }
         }
+        signalQueueRef.current = [];
       }
     }
 
     initPeer();
 
     return () => {
-      peerReadyRef.current = false;
       if (peerRef.current) peerRef.current.destroy();
       signalQueueRef.current = [];
     };
-  }, [socketConnected, stream, isBroadcaster, sendSignal]);
+  }, [stream, isBroadcaster, sendSignal, socketConnected]);
 
-  // 3. Recibir signals
   useEffect(() => {
     const unsubscribe = onSignal((signal: any) => {
-      if (signal.type === 'new-spectator') return;
-
-      if (!peerReadyRef.current || !peerRef.current) {
+      if (!peerRef.current) {
+        // Peer no está listo todavía - encolar el signal
         console.log('📥 Encolando signal:', signal.type || 'candidate');
         signalQueueRef.current.push(signal);
         return;
       }
-
       try {
         console.log('➡️ Signal al peer:', signal.type || 'candidate');
         peerRef.current.signal(signal);
-      } catch (e: any) {
-        if (!e.message?.includes('wrong state')) console.error(e.message);
+      } catch (err: any) {
+        if (!err.message.includes('wrong state')) {
+          console.error('❌ Error signal:', err.message);
+        }
       }
     });
     return unsubscribe;

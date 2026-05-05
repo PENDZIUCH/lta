@@ -1,4 +1,4 @@
-// lib/useSignaling.ts
+// lib/useSignaling.ts - WebSocket signaling con Cloudflare Worker
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -36,6 +36,7 @@ export function useSignaling(broadcastId: string, isBroadcaster: boolean = false
     };
 
     socketRef.current = socket;
+
     return () => { socket.close(); };
   }, [broadcastId, isBroadcaster]);
 
