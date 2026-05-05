@@ -6,6 +6,8 @@ export async function getIceServers() {
     const res = await fetch('https://lta-webrtc.pendziuch.workers.dev/turn-credentials');
     const data = await res.json();
     console.log('✅ TURN credentials obtenidas de Cloudflare');
+    console.log('📋 Ice servers count:', data.iceServers?.length);
+    console.log('📋 Ice servers:', JSON.stringify(data.iceServers));
     return data.iceServers;
   } catch (err) {
     console.warn('⚠️ No se pudieron obtener TURN credentials, usando solo STUN');
