@@ -13,29 +13,25 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
 
   const peerRef = useRef<any>(null);
   const signalQueueRef = useRef<any[]>([]);
+  const peerReadyRef = useRef(false);
   const { sendSignal, onSignal, isConnected: socketConnected } = useSignaling(broadcastId, isBroadcaster);
 
+  // 1. Obtener cámara (broadcaster)
   useEffect(() => {
     if (!isBroadcaster) return;
-    async function getLocalStream() {
-      try {
-        console.log('📹 Pidiendo cámara...');
-        const mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-          audio: true,
-        });
-        console.log('✅ Cámara obtenida');
-        setStream(mediaStream);
-      } catch (err) {
-        setError(`Error: ${err}`);
-      }
-    }
-    getLocalStream();
+    navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: true,
+    }).then(mediaStream => {
+      console.log('✅ Cámara obtenida');
+      setStream(mediaStream);
+    }).catch(err => setError(`Error cámara: ${err}`));
   }, [isBroadcaster]);
 
+  // 2. Crear peer cuando WebSocket conecta
   useEffect(() => {
     if (!socketConnected) return;
-    if (!stream && isBroadcaster) return;
+    if (isBroadcaster && !stream) return;
 
     async function initPeer() {
       console.log('🚀 Obteniendo TURN credentials...');
@@ -49,7 +45,7 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
       });
 
       peer.on('signal', (data: any) => {
-        console.log('📡 Signal:', data.type || 'candidate');
+        console.log('📡 Signal out:', data.type || 'candidate');
         sendSignal(data);
       });
 
@@ -59,56 +55,63 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
       });
 
       peer.on('stream', (remoteMediaStream: MediaStream) => {
-        console.log('🎥 Stream recibido');
+        console.log('🎥 Stream recibido!');
         setRemoteStream(remoteMediaStream);
       });
 
       peer.on('error', (err: any) => {
-        if (!err.message.includes('wrong state')) {
-          console.error('❌ WebRTC Error:', err.message);
-          setError(`Error: ${err.message}`);
+        if (!err.message?.includes('wrong state')) {
+          console.error('❌ Error:', err.message);
+          setError(err.message);
         }
       });
 
       peer.on('close', () => setConnected(false));
 
       peerRef.current = peer;
+      peerReadyRef.current = true;
 
       // Procesar signals encolados
       if (signalQueueRef.current.length > 0) {
         console.log(`📬 Procesando ${signalQueueRef.current.length} signals encolados`);
-        for (const signal of signalQueueRef.current) {
-          try { peer.signal(signal); } catch {}
-        }
+        const queue = [...signalQueueRef.current];
         signalQueueRef.current = [];
+        for (const signal of queue) {
+          try {
+            console.log('➡️ Signal encolado al peer:', signal.type || 'candidate');
+            peer.signal(signal);
+          } catch (e: any) {
+            if (!e.message?.includes('wrong state')) console.error(e.message);
+          }
+        }
       }
     }
 
     initPeer();
 
     return () => {
+      peerReadyRef.current = false;
       if (peerRef.current) peerRef.current.destroy();
       signalQueueRef.current = [];
     };
-  }, [stream, isBroadcaster, sendSignal, socketConnected]);
+  }, [socketConnected, stream, isBroadcaster, sendSignal]);
 
+  // 3. Recibir signals
   useEffect(() => {
     const unsubscribe = onSignal((signal: any) => {
-      // Ignorar señales internas
       if (signal.type === 'new-spectator') return;
 
-      if (!peerRef.current) {
+      if (!peerReadyRef.current || !peerRef.current) {
         console.log('📥 Encolando signal:', signal.type || 'candidate');
         signalQueueRef.current.push(signal);
         return;
       }
+
       try {
         console.log('➡️ Signal al peer:', signal.type || 'candidate');
         peerRef.current.signal(signal);
-      } catch (err: any) {
-        if (!err.message?.includes('wrong state')) {
-          console.error('❌ Error signal:', err.message);
-        }
+      } catch (e: any) {
+        if (!e.message?.includes('wrong state')) console.error(e.message);
       }
     });
     return unsubscribe;
