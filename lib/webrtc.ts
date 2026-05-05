@@ -1,47 +1,25 @@
-// lib/webrtc.ts - SimplePeer helpers con TURN servers
+// lib/webrtc.ts - SimplePeer con Cloudflare TURN
 import SimplePeer from 'simple-peer';
 
-export function createSimplePeer(options?: SimplePeer.Options): SimplePeer.Instance {
+export async function getIceServers() {
+  try {
+    const res = await fetch('https://lta-webrtc.pendziuch.workers.dev/turn-credentials');
+    const data = await res.json();
+    console.log('✅ TURN credentials obtenidas de Cloudflare');
+    return data.iceServers;
+  } catch (err) {
+    console.warn('⚠️ No se pudieron obtener TURN credentials, usando solo STUN');
+    return [{ urls: 'stun:stun.l.google.com:19302' }];
+  }
+}
+
+export function createSimplePeer(options?: SimplePeer.Options & { iceServers?: any[] }): SimplePeer.Instance {
   return new SimplePeer({
     initiator: options?.initiator ?? false,
     trickle: true,
     stream: options?.stream,
     config: {
-      iceServers: [
-        // STUN servers (para descubrir IP pública)
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:global.stun.twilio.com:3478' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        
-        // TURN servers (relay cuando falla conexión directa)
-        // OpenRelay - Free TURN server
-        {
-          urls: 'turn:openrelay.metered.ca:80',
-          username: 'openrelayproject',
-          credential: 'openrelayproject',
-        },
-        {
-          urls: 'turn:openrelay.metered.ca:443',
-          username: 'openrelayproject',
-          credential: 'openrelayproject',
-        },
-        {
-          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-          username: 'openrelayproject',
-          credential: 'openrelayproject',
-        },
-      ],
-      iceTransportPolicy: 'all', // Probar todas las rutas (STUN + TURN)
+      iceServers: options?.iceServers || [{ urls: 'stun:stun.l.google.com:19302' }],
     },
   });
-}
-
-export function getStreamStats(peer: SimplePeer.Instance): any {
-  return {
-    connected: peer.connected,
-    bytesReceived: 0,
-    bytesSent: 0,
-    roundTripTime: 0,
-  };
 }
