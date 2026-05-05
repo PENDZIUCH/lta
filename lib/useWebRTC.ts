@@ -14,9 +14,9 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
   const streamRef = useRef<MediaStream | null>(null);
   const iceServersRef = useRef<any[]>([]);
   const signalQueueRef = useRef<any[]>([]);
+  const connectedRef = useRef(false);
   const { sendSignal, onSignal, isConnected: socketConnected } = useSignaling(broadcastId, isBroadcaster);
 
-  // Obtener cámara
   useEffect(() => {
     if (!isBroadcaster) return;
     navigator.mediaDevices.getUserMedia({ video: true, audio: true })
@@ -24,31 +24,33 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
       .catch(e => setError(`Cámara: ${e}`));
   }, [isBroadcaster]);
 
-  // Función para crear/recrear peer
   const initPeer = useCallback(async (initiator: boolean, currentStream?: MediaStream | null) => {
     if (peerRef.current) { peerRef.current.destroy(); peerRef.current = null; }
     signalQueueRef.current = [];
+    connectedRef.current = false;
     setConnected(false);
 
     if (!iceServersRef.current.length) {
-      console.log('🚀 Obteniendo TURN...');
       iceServersRef.current = await getIceServers();
     }
 
     console.log('🔥 Creando peer, initiator:', initiator);
     const peer = createSimplePeer({ initiator, stream: currentStream || undefined, iceServers: iceServersRef.current });
 
-    peer.on('signal', (d: any) => { console.log('📡 Signal out:', d.type || 'candidate'); sendSignal(d); });
-    peer.on('connect', () => { console.log('✅✅✅ PEER CONECTADO ✅✅✅'); setConnected(true); });
+    peer.on('signal', (d: any) => { sendSignal(d); });
+    peer.on('connect', () => {
+      console.log('✅✅✅ PEER CONECTADO ✅✅✅');
+      connectedRef.current = true;
+      setConnected(true);
+    });
     peer.on('stream', (s: MediaStream) => { console.log('🎥 Stream!'); setRemoteStream(s); });
-    peer.on('error', (e: any) => { if (!e.message?.includes('wrong state')) setError(e.message); });
-    peer.on('close', () => setConnected(false));
+    peer.on('error', (e: any) => { if (!e.message?.includes('wrong state') && !e.message?.includes('Abort')) setError(e.message); });
+    peer.on('close', () => { connectedRef.current = false; setConnected(false); });
 
     peerRef.current = peer;
     return peer;
   }, [sendSignal]);
 
-  // Iniciar peer cuando socket conecta
   useEffect(() => {
     if (!socketConnected) return;
     if (isBroadcaster && !stream) return;
@@ -56,11 +58,14 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
     return () => { if (peerRef.current) peerRef.current.destroy(); };
   }, [socketConnected, stream, isBroadcaster]);
 
-  // Recibir signals
   useEffect(() => {
     return onSignal(async (signal: any) => {
-      // Broadcaster: nuevo spectator conectado → renegociar
       if (signal.type === 'new-spectator' && isBroadcaster) {
+        // Solo renegociar si no hay nadie conectado
+        if (connectedRef.current) {
+          console.log('👤 Spectator nuevo pero ya hay conexión activa - ignorando');
+          return;
+        }
         console.log('👤 Nuevo spectator → recreando peer');
         await initPeer(true, streamRef.current);
         return;
@@ -71,7 +76,6 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
         return;
       }
 
-      // Procesar cola primero
       if (signalQueueRef.current.length > 0) {
         const queue = [...signalQueueRef.current];
         signalQueueRef.current = [];
@@ -81,7 +85,6 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
       }
 
       try {
-        console.log('➡️ Signal al peer:', signal.type || 'candidate');
         peerRef.current.signal(signal);
       } catch (e: any) {
         if (!e.message?.includes('wrong state')) console.error(e.message);
