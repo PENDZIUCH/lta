@@ -3,6 +3,7 @@ import { BroadcasterView } from '@/components/BroadcasterView';
 
 export const runtime = 'edge';
 
-export default function BroadcastPage({ params }: { params: { id: string } }) {
-  return <BroadcasterView broadcastId={params.id} />;
+export default async function BroadcastPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  return <BroadcasterView broadcastId={id} />;
 }
