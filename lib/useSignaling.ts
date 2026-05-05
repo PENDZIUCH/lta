@@ -1,4 +1,3 @@
-// lib/useSignaling.ts - WebSocket signaling con Cloudflare Worker
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -11,49 +10,29 @@ export function useSignaling(broadcastId: string, isBroadcaster: boolean = false
   useEffect(() => {
     const role = isBroadcaster ? 'broadcaster' : 'spectator';
     const wsUrl = `wss://lta-webrtc.pendziuch.workers.dev?broadcastId=${broadcastId}&role=${role}`;
-    console.log('🌐 WebSocket URL:', wsUrl);
-
+    console.log('🌐 WebSocket:', wsUrl);
     const socket = new WebSocket(wsUrl);
-
-    socket.onopen = () => {
-      console.log('✅ WebSocket conectado a Cloudflare');
-      setIsConnected(true);
-    };
-
-    socket.onmessage = (event) => {
-      const signal = JSON.parse(event.data);
-      console.log('➡️ Signal recibido:', signal.type || 'candidate');
+    socket.onopen = () => { console.log('✅ WS conectado'); setIsConnected(true); };
+    socket.onmessage = (e) => {
+      const signal = JSON.parse(e.data);
+      console.log('📥 Signal recibido:', signal.type || 'candidate');
       signalCallbacksRef.current.forEach(cb => cb(signal));
     };
-
-    socket.onclose = () => {
-      console.log('❌ WebSocket desconectado');
-      setIsConnected(false);
-    };
-
-    socket.onerror = (err) => {
-      console.error('❌ Error WebSocket:', err);
-    };
-
+    socket.onclose = () => { console.log('❌ WS desconectado'); setIsConnected(false); };
     socketRef.current = socket;
-
-    return () => { socket.close(); };
+    return () => socket.close();
   }, [broadcastId, isBroadcaster]);
 
   const sendSignal = useCallback((signal: any) => {
-    if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
-      console.warn('⚠️ Socket no conectado');
-      return;
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      console.log('📡 Enviando:', signal.type || 'candidate');
+      socketRef.current.send(JSON.stringify(signal));
     }
-    console.log('📡 Enviando signal:', signal.type || 'candidate');
-    socketRef.current.send(JSON.stringify(signal));
   }, []);
 
-  const onSignal = useCallback((callback: (signal: any) => void) => {
-    signalCallbacksRef.current.push(callback);
-    return () => {
-      signalCallbacksRef.current = signalCallbacksRef.current.filter(cb => cb !== callback);
-    };
+  const onSignal = useCallback((cb: (signal: any) => void) => {
+    signalCallbacksRef.current.push(cb);
+    return () => { signalCallbacksRef.current = signalCallbacksRef.current.filter(c => c !== cb); };
   }, []);
 
   return { sendSignal, onSignal, isConnected };
