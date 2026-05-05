@@ -1,4 +1,4 @@
-// lib/useSignaling.ts - WebSocket signaling con Cloudflare Worker
+// lib/useSignaling.ts
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 export function useSignaling(broadcastId: string, isBroadcaster: boolean = false) {
   const socketRef = useRef<WebSocket | null>(null);
   const signalCallbacksRef = useRef<((signal: any) => void)[]>([]);
+  const newSpectatorCallbackRef = useRef<(() => void) | null>(null);
   const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
@@ -22,6 +23,16 @@ export function useSignaling(broadcastId: string, isBroadcaster: boolean = false
 
     socket.onmessage = (event) => {
       const signal = JSON.parse(event.data);
+      
+      // Si es notificación de nuevo spectator, avisar al broadcaster
+      if (signal.type === 'new-spectator') {
+        console.log('👤 Nuevo spectator conectado - reenviar offer');
+        if (newSpectatorCallbackRef.current) {
+          newSpectatorCallbackRef.current();
+        }
+        return;
+      }
+
       console.log('➡️ Signal recibido:', signal.type || 'candidate');
       signalCallbacksRef.current.forEach(cb => cb(signal));
     };
@@ -36,7 +47,6 @@ export function useSignaling(broadcastId: string, isBroadcaster: boolean = false
     };
 
     socketRef.current = socket;
-
     return () => { socket.close(); };
   }, [broadcastId, isBroadcaster]);
 
@@ -56,5 +66,9 @@ export function useSignaling(broadcastId: string, isBroadcaster: boolean = false
     };
   }, []);
 
-  return { sendSignal, onSignal, isConnected };
+  const onNewSpectator = useCallback((callback: () => void) => {
+    newSpectatorCallbackRef.current = callback;
+  }, []);
+
+  return { sendSignal, onSignal, onNewSpectator, isConnected };
 }
