@@ -12,7 +12,7 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
   const [connected, setConnected] = useState(false);
 
   const peerRef = useRef<any>(null);
-  const { sendSignal, onSignal, isConnected: socketConnected } = useSignaling(broadcastId);
+  const { sendSignal, onSignal, isConnected: socketConnected } = useSignaling(broadcastId, isBroadcaster);
 
   // 1. Obtener stream local (cámara)
   useEffect(() => {
@@ -49,15 +49,6 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
         initiator: isBroadcaster,
         stream: stream || undefined,
         iceServers,
-      });
-
-      // Log ICE connection state via underlying RTCPeerConnection
-      (peer as any)._pc?.addEventListener('iceconnectionstatechange', () => {
-        console.log('🧊 ICE state:', (peer as any)._pc?.iceConnectionState);
-      });
-
-      (peer as any)._pc?.addEventListener('icegatheringstatechange', () => {
-        console.log('🧊 ICE gathering:', (peer as any)._pc?.iceGatheringState);
       });
 
       peer.on('signal', (data: any) => {
@@ -102,7 +93,10 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
   // 3. Escuchar señales entrantes
   useEffect(() => {
     const unsubscribe = onSignal((signal: any) => {
-      if (!peerRef.current) return;
+      if (!peerRef.current) {
+        console.warn('⚠️ peer no existe aún, signal ignorado:', signal.type);
+        return;
+      }
       try {
         console.log('➡️ Signal al peer:', signal.type || 'candidate');
         peerRef.current.signal(signal);
