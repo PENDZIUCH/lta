@@ -9,23 +9,20 @@ export function useSignaling(broadcastId: string, isBroadcaster: boolean = false
   const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
-    console.log('🔌 Conectando a Cloudflare WebSocket...');
-    
     const role = isBroadcaster ? 'broadcaster' : 'spectator';
     const wsUrl = `wss://lta-webrtc.pendziuch.workers.dev?broadcastId=${broadcastId}&role=${role}`;
-    
     console.log('🌐 WebSocket URL:', wsUrl);
 
     const socket = new WebSocket(wsUrl);
 
     socket.onopen = () => {
-      console.log('✅ WebSocket conectado a Cloudflare como', role);
+      console.log('✅ WebSocket conectado a Cloudflare');
       setIsConnected(true);
     };
 
     socket.onmessage = (event) => {
       const signal = JSON.parse(event.data);
-      console.log('📥 Signal recibido:', signal.type || 'candidate');
+      console.log('➡️ Signal recibido:', signal.type || 'candidate');
       signalCallbacksRef.current.forEach(cb => cb(signal));
     };
 
@@ -40,9 +37,7 @@ export function useSignaling(broadcastId: string, isBroadcaster: boolean = false
 
     socketRef.current = socket;
 
-    return () => {
-      socket.close();
-    };
+    return () => { socket.close(); };
   }, [broadcastId, isBroadcaster]);
 
   const sendSignal = useCallback((signal: any) => {

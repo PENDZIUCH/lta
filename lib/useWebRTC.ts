@@ -14,10 +14,8 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
   const peerRef = useRef<any>(null);
   const { sendSignal, onSignal, isConnected: socketConnected } = useSignaling(broadcastId, isBroadcaster);
 
-  // 1. Obtener stream local (cámara)
   useEffect(() => {
     if (!isBroadcaster) return;
-
     async function getLocalStream() {
       try {
         console.log('📹 Pidiendo cámara...');
@@ -28,15 +26,12 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
         console.log('✅ Cámara obtenida');
         setStream(mediaStream);
       } catch (err) {
-        console.error('❌ Error cámara:', err);
         setError(`Error: ${err}`);
       }
     }
-
     getLocalStream();
   }, [isBroadcaster]);
 
-  // 2. Crear SimplePeer con TURN credentials de Cloudflare
   useEffect(() => {
     if (!socketConnected) return;
     if (!stream && isBroadcaster) return;
@@ -74,7 +69,6 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
       });
 
       peer.on('close', () => {
-        console.log('❌ Peer cerrado');
         setConnected(false);
       });
 
@@ -84,21 +78,14 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
     initPeer();
 
     return () => {
-      if (peerRef.current) {
-        peerRef.current.destroy();
-      }
+      if (peerRef.current) peerRef.current.destroy();
     };
   }, [stream, isBroadcaster, sendSignal, socketConnected]);
 
-  // 3. Escuchar señales entrantes
   useEffect(() => {
     const unsubscribe = onSignal((signal: any) => {
-      if (!peerRef.current) {
-        console.warn('⚠️ peer no existe aún, signal ignorado:', signal.type);
-        return;
-      }
+      if (!peerRef.current) return;
       try {
-        console.log('➡️ Signal al peer:', signal.type || 'candidate');
         peerRef.current.signal(signal);
       } catch (err: any) {
         if (!err.message.includes('wrong state')) {
