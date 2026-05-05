@@ -6,7 +6,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 export function useSignaling(broadcastId: string, isBroadcaster: boolean = false) {
   const socketRef = useRef<WebSocket | null>(null);
   const signalCallbacksRef = useRef<((signal: any) => void)[]>([]);
-  const newSpectatorCallbackRef = useRef<(() => void) | null>(null);
   const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
@@ -23,16 +22,6 @@ export function useSignaling(broadcastId: string, isBroadcaster: boolean = false
 
     socket.onmessage = (event) => {
       const signal = JSON.parse(event.data);
-      
-      // Si es notificación de nuevo spectator, avisar al broadcaster
-      if (signal.type === 'new-spectator') {
-        console.log('👤 Nuevo spectator conectado - reenviar offer');
-        if (newSpectatorCallbackRef.current) {
-          newSpectatorCallbackRef.current();
-        }
-        return;
-      }
-
       console.log('➡️ Signal recibido:', signal.type || 'candidate');
       signalCallbacksRef.current.forEach(cb => cb(signal));
     };
@@ -66,9 +55,5 @@ export function useSignaling(broadcastId: string, isBroadcaster: boolean = false
     };
   }, []);
 
-  const onNewSpectator = useCallback((callback: () => void) => {
-    newSpectatorCallbackRef.current = callback;
-  }, []);
-
-  return { sendSignal, onSignal, onNewSpectator, isConnected };
+  return { sendSignal, onSignal, isConnected };
 }

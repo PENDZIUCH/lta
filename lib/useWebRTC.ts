@@ -13,8 +13,7 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
 
   const peerRef = useRef<any>(null);
   const signalQueueRef = useRef<any[]>([]);
-  const iceServersRef = useRef<any[]>([]);
-  const { sendSignal, onSignal, onNewSpectator, isConnected: socketConnected } = useSignaling(broadcastId, isBroadcaster);
+  const { sendSignal, onSignal, isConnected: socketConnected } = useSignaling(broadcastId, isBroadcaster);
 
   useEffect(() => {
     if (!isBroadcaster) return;
@@ -34,84 +33,70 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
     getLocalStream();
   }, [isBroadcaster]);
 
-  const createPeer = async (currentStream: MediaStream | null) => {
-    if (peerRef.current) {
-      peerRef.current.destroy();
-      peerRef.current = null;
-    }
-
-    if (!iceServersRef.current.length) {
-      console.log('🚀 Obteniendo TURN credentials...');
-      iceServersRef.current = await getIceServers();
-    }
-
-    console.log('🔥 Creando peer...');
-    const peer = createSimplePeer({
-      initiator: isBroadcaster,
-      stream: currentStream || undefined,
-      iceServers: iceServersRef.current,
-    });
-
-    peer.on('signal', (data: any) => {
-      console.log('📡 Signal:', data.type || 'candidate');
-      sendSignal(data);
-    });
-
-    peer.on('connect', () => {
-      console.log('✅✅✅ PEER CONECTADO ✅✅✅');
-      setConnected(true);
-    });
-
-    peer.on('stream', (remoteMediaStream: MediaStream) => {
-      console.log('🎥 Stream recibido');
-      setRemoteStream(remoteMediaStream);
-    });
-
-    peer.on('error', (err: any) => {
-      if (!err.message.includes('wrong state')) {
-        console.error('❌ WebRTC Error:', err.message);
-        setError(`Error: ${err.message}`);
-      }
-    });
-
-    peer.on('close', () => setConnected(false));
-
-    peerRef.current = peer;
-
-    // Procesar signals encolados
-    if (signalQueueRef.current.length > 0) {
-      console.log(`📬 Procesando ${signalQueueRef.current.length} signals encolados`);
-      for (const signal of signalQueueRef.current) {
-        try { peer.signal(signal); } catch {}
-      }
-      signalQueueRef.current = [];
-    }
-  };
-
   useEffect(() => {
     if (!socketConnected) return;
     if (!stream && isBroadcaster) return;
-    createPeer(stream);
+
+    async function initPeer() {
+      console.log('🚀 Obteniendo TURN credentials...');
+      const iceServers = await getIceServers();
+      console.log('🔥 Creando peer...');
+
+      const peer = createSimplePeer({
+        initiator: isBroadcaster,
+        stream: stream || undefined,
+        iceServers,
+      });
+
+      peer.on('signal', (data: any) => {
+        console.log('📡 Signal:', data.type || 'candidate');
+        sendSignal(data);
+      });
+
+      peer.on('connect', () => {
+        console.log('✅✅✅ PEER CONECTADO ✅✅✅');
+        setConnected(true);
+      });
+
+      peer.on('stream', (remoteMediaStream: MediaStream) => {
+        console.log('🎥 Stream recibido');
+        setRemoteStream(remoteMediaStream);
+      });
+
+      peer.on('error', (err: any) => {
+        if (!err.message.includes('wrong state')) {
+          console.error('❌ WebRTC Error:', err.message);
+          setError(`Error: ${err.message}`);
+        }
+      });
+
+      peer.on('close', () => setConnected(false));
+
+      peerRef.current = peer;
+
+      // Procesar signals encolados
+      if (signalQueueRef.current.length > 0) {
+        console.log(`📬 Procesando ${signalQueueRef.current.length} signals encolados`);
+        for (const signal of signalQueueRef.current) {
+          try { peer.signal(signal); } catch {}
+        }
+        signalQueueRef.current = [];
+      }
+    }
+
+    initPeer();
+
     return () => {
       if (peerRef.current) peerRef.current.destroy();
       signalQueueRef.current = [];
     };
   }, [stream, isBroadcaster, sendSignal, socketConnected]);
 
-  // Broadcaster: recrear peer cuando llega nuevo spectator
-  useEffect(() => {
-    if (!isBroadcaster) return;
-    onNewSpectator(() => {
-      console.log('🔄 Nuevo spectator - recreando peer...');
-      setConnected(false);
-      signalQueueRef.current = [];
-      createPeer(stream);
-    });
-  }, [isBroadcaster, onNewSpectator, stream]);
-
-  // Spectator: encolar signals
   useEffect(() => {
     const unsubscribe = onSignal((signal: any) => {
+      // Ignorar señales internas
+      if (signal.type === 'new-spectator') return;
+
       if (!peerRef.current) {
         console.log('📥 Encolando signal:', signal.type || 'candidate');
         signalQueueRef.current.push(signal);
