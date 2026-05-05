@@ -12,6 +12,7 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
   const [connected, setConnected] = useState(false);
 
   const peerRef = useRef<any>(null);
+  const signalQueueRef = useRef<any[]>([]); // Cola de signals mientras el peer no está listo
   const { sendSignal, onSignal, isConnected: socketConnected } = useSignaling(broadcastId, isBroadcaster);
 
   useEffect(() => {
@@ -39,6 +40,7 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
     async function initPeer() {
       console.log('🚀 Obteniendo TURN credentials...');
       const iceServers = await getIceServers();
+      console.log('🔥 Creando peer...');
 
       const peer = createSimplePeer({
         initiator: isBroadcaster,
@@ -68,24 +70,42 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
         }
       });
 
-      peer.on('close', () => {
-        setConnected(false);
-      });
+      peer.on('close', () => setConnected(false));
 
       peerRef.current = peer;
+
+      // Procesar signals que llegaron antes de que el peer estuviera listo
+      if (signalQueueRef.current.length > 0) {
+        console.log(`📬 Procesando ${signalQueueRef.current.length} signals encolados`);
+        for (const signal of signalQueueRef.current) {
+          try {
+            peer.signal(signal);
+          } catch (err: any) {
+            console.error('❌ Error signal encolado:', err.message);
+          }
+        }
+        signalQueueRef.current = [];
+      }
     }
 
     initPeer();
 
     return () => {
       if (peerRef.current) peerRef.current.destroy();
+      signalQueueRef.current = [];
     };
   }, [stream, isBroadcaster, sendSignal, socketConnected]);
 
   useEffect(() => {
     const unsubscribe = onSignal((signal: any) => {
-      if (!peerRef.current) return;
+      if (!peerRef.current) {
+        // Peer no está listo todavía - encolar el signal
+        console.log('📥 Encolando signal:', signal.type || 'candidate');
+        signalQueueRef.current.push(signal);
+        return;
+      }
       try {
+        console.log('➡️ Signal al peer:', signal.type || 'candidate');
         peerRef.current.signal(signal);
       } catch (err: any) {
         if (!err.message.includes('wrong state')) {
