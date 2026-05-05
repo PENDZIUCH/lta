@@ -44,7 +44,6 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
     async function initPeer() {
       console.log('🚀 Obteniendo TURN credentials...');
       const iceServers = await getIceServers();
-      console.log('🔥 Creando peer con', iceServers.length, 'ice servers');
 
       const peer = createSimplePeer({
         initiator: isBroadcaster,
@@ -52,8 +51,17 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
         iceServers,
       });
 
+      // Log ICE connection state via underlying RTCPeerConnection
+      (peer as any)._pc?.addEventListener('iceconnectionstatechange', () => {
+        console.log('🧊 ICE state:', (peer as any)._pc?.iceConnectionState);
+      });
+
+      (peer as any)._pc?.addEventListener('icegatheringstatechange', () => {
+        console.log('🧊 ICE gathering:', (peer as any)._pc?.iceGatheringState);
+      });
+
       peer.on('signal', (data: any) => {
-        console.log('📡 Signal:', data.type);
+        console.log('📡 Signal:', data.type || 'candidate');
         sendSignal(data);
       });
 
@@ -96,6 +104,7 @@ export function useWebRTC(broadcastId: string, isBroadcaster: boolean) {
     const unsubscribe = onSignal((signal: any) => {
       if (!peerRef.current) return;
       try {
+        console.log('➡️ Signal al peer:', signal.type || 'candidate');
         peerRef.current.signal(signal);
       } catch (err: any) {
         if (!err.message.includes('wrong state')) {
