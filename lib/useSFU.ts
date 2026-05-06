@@ -125,6 +125,7 @@ export function useSFUSpectator(broadcastId: string) {
       try {
         console.log('🔌 Suscribiendo a tracks:', broadcasterInfo.trackNames);
 
+        // Spectator NO necesita tracks propios - solo recibir
         pc = new RTCPeerConnection({
           iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }],
           bundlePolicy: 'max-bundle',
@@ -143,21 +144,11 @@ export function useSFUSpectator(broadcastId: string) {
           }
         };
 
-        await pc.setLocalDescription(await pc.createOffer());
-        const session = await sfu('/sessions/new', {
-          sessionDescription: { type: 'offer', sdp: pc.localDescription!.sdp }
-        });
-        await pc.setRemoteDescription(new RTCSessionDescription(session.sessionDescription));
+        // Crear sesión - SIN offer inicial (el SFU la genera)
+        const session = await sfu('/sessions/new');
+        console.log('Spectator session:', session.sessionId);
 
-        await new Promise<void>((resolve, reject) => {
-          const t = setTimeout(() => reject(new Error('ICE timeout')), 15000);
-          pc.addEventListener('iceconnectionstatechange', () => {
-            console.log('Spectator ICE:', pc.iceConnectionState);
-            if (pc.iceConnectionState === 'connected') { clearTimeout(t); resolve(); }
-            if (pc.iceConnectionState === 'failed') { clearTimeout(t); reject(new Error('ICE failed')); }
-          });
-        });
-
+        // Pedir tracks del broadcaster directamente
         const pullResult = await sfu(`/sessions/${session.sessionId}/tracks/new`, {
           tracks: broadcasterInfo.trackNames.map(trackName => ({
             location: 'remote',
@@ -166,13 +157,16 @@ export function useSFUSpectator(broadcastId: string) {
           })),
         });
 
-        console.log('Pull result:', JSON.stringify(pullResult));
+        console.log('Pull result requiresRenegotiation:', pullResult.requiresImmediateRenegotiation);
+        console.log('Pull sessionDescription type:', pullResult.sessionDescription?.type);
 
         if (pullResult.requiresImmediateRenegotiation) {
+          // SFU nos manda una offer, respondemos con answer
           await pc.setRemoteDescription(new RTCSessionDescription(pullResult.sessionDescription));
-          await pc.setLocalDescription(await pc.createAnswer());
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
           await sfu(`/sessions/${session.sessionId}/renegotiate`, {
-            sessionDescription: { type: 'answer', sdp: pc.localDescription!.sdp }
+            sessionDescription: { type: 'answer', sdp: answer.sdp }
           }, 'PUT');
         }
 
