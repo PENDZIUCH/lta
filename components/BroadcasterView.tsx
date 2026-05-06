@@ -3,20 +3,17 @@
 import { useSFUBroadcaster } from '@/lib/useSFU';
 import { useRef, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { Chat } from './Chat';
 
 export function BroadcasterView({ broadcastId }: { broadcastId: string }) {
   const { stream, live, viewers, messages, error, sendMessage } = useSFUBroadcaster(broadcastId);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [origin, setOrigin] = useState('');
   const [copied, setCopied] = useState(false);
-  const [chatText, setChatText] = useState('');
 
   useEffect(() => { setOrigin(window.location.origin); }, []);
-
   useEffect(() => {
-    if (stream && videoRef.current) {
-      videoRef.current.srcObject = stream;
-    }
+    if (stream && videoRef.current) videoRef.current.srcObject = stream;
   }, [stream]);
 
   const watchUrl = `${origin}/watch/${broadcastId}`;
@@ -25,16 +22,6 @@ export function BroadcasterView({ broadcastId }: { broadcastId: string }) {
     navigator.clipboard.writeText(watchUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleWhatsApp = () => {
-    window.open(`https://wa.me/?text=${encodeURIComponent(watchUrl)}`, '_blank');
-  };
-
-  const handleSend = () => {
-    if (!chatText.trim()) return;
-    sendMessage(chatText.trim());
-    setChatText('');
   };
 
   return (
@@ -66,37 +53,17 @@ export function BroadcasterView({ broadcastId }: { broadcastId: string }) {
             <button onClick={handleCopy} className="flex-1 bg-white text-blue-700 font-bold py-2 px-4 rounded text-sm">
               {copied ? '✅ Copiado!' : '📋 Copiar'}
             </button>
-            <button onClick={handleWhatsApp} className="flex-1 bg-green-500 text-white font-bold py-2 px-4 rounded text-sm">
+            <button
+              onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(watchUrl)}`, '_blank')}
+              className="flex-1 bg-green-500 text-white font-bold py-2 px-4 rounded text-sm"
+            >
               📲 Compartir
             </button>
           </div>
         </div>
 
-        {/* Chat */}
-        <div className="bg-gray-900 rounded-lg p-4 mb-4">
-          <p className="text-white font-bold mb-2">💬 Chat en vivo</p>
-          <div className="h-40 overflow-y-auto mb-2 space-y-1">
-            {messages.length === 0
-              ? <p className="text-gray-500 text-sm">Sin mensajes aún...</p>
-              : messages.map((m, i) => (
-                <p key={i} className="text-white text-sm">
-                  <span className="text-blue-400 font-bold">{m.from}:</span> {m.text}
-                </p>
-              ))
-            }
-          </div>
-          <div className="flex gap-2">
-            <input
-              value={chatText}
-              onChange={e => setChatText(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleSend()}
-              placeholder="Escribí un mensaje..."
-              className="flex-1 bg-gray-700 text-white px-3 py-2 rounded text-sm"
-            />
-            <button onClick={handleSend} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold">
-              Enviar
-            </button>
-          </div>
+        <div className="mb-4">
+          <Chat messages={messages} onSend={sendMessage} myName="Yo" />
         </div>
 
         <Link href="/">
