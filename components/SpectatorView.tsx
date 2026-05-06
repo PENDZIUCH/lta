@@ -8,17 +8,28 @@ import { Chat } from './Chat';
 export function SpectatorView({ broadcastId }: { broadcastId: string }) {
   const { remoteStream, connected, messages, myName, stageStatus, error, sendMessage, requestStage } = useSFUSpectator(broadcastId);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [needsPlay, setNeedsPlay] = useState(false);
+  const [muted, setMuted] = useState(true);
   const [showStageOptions, setShowStageOptions] = useState(false);
 
   useEffect(() => {
     if (remoteStream && videoRef.current) {
       videoRef.current.srcObject = remoteStream;
-      videoRef.current.play()
-        .then(() => setNeedsPlay(false))
-        .catch(() => setNeedsPlay(true));
+      videoRef.current.muted = true;
+      videoRef.current.play().catch(() => {});
     }
   }, [remoteStream]);
+
+  // Activar audio en el primer click del usuario
+  useEffect(() => {
+    const handleClick = () => {
+      if (videoRef.current && muted) {
+        videoRef.current.muted = false;
+        setMuted(false);
+      }
+    };
+    document.addEventListener('click', handleClick, { once: true });
+    return () => document.removeEventListener('click', handleClick);
+  }, [muted]);
 
   const handleRequestStage = (withVideo: boolean) => {
     requestStage(withVideo);
@@ -38,18 +49,19 @@ export function SpectatorView({ broadcastId }: { broadcastId: string }) {
         <div className="bg-gray-900 rounded-lg overflow-hidden mb-4 relative">
           <video
             ref={videoRef}
-            autoPlay playsInline
+            autoPlay
+            muted
+            playsInline
             className="w-full h-auto bg-black"
             style={{ display: remoteStream ? 'block' : 'none' }}
           />
-          {needsPlay && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-70">
-              <button
-                onClick={() => { videoRef.current?.play(); setNeedsPlay(false); }}
-                className="bg-white text-black font-bold py-4 px-8 rounded-full text-xl"
-              >
-                ▶ Ver stream
-              </button>
+          {/* Indicador de audio muteado */}
+          {remoteStream && muted && (
+            <div
+              className="absolute bottom-2 right-2 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded cursor-pointer"
+              onClick={() => { if (videoRef.current) { videoRef.current.muted = false; setMuted(false); } }}
+            >
+              🔇 Tocá para activar audio
             </div>
           )}
           {!remoteStream && (
@@ -65,7 +77,6 @@ export function SpectatorView({ broadcastId }: { broadcastId: string }) {
             <p className="font-bold">{connected ? '✅ Conectado' : '⏳ Conectando...'}</p>
           </div>
 
-          {/* Botón pedir participar */}
           <div className="flex-1">
             {stageStatus === 'idle' && (
               <div className="relative">
@@ -77,16 +88,10 @@ export function SpectatorView({ broadcastId }: { broadcastId: string }) {
                 </button>
                 {showStageOptions && (
                   <div className="absolute bottom-full mb-2 w-full bg-gray-800 rounded overflow-hidden shadow-lg z-10">
-                    <button
-                      onClick={() => handleRequestStage(true)}
-                      className="w-full text-left px-4 py-3 text-white hover:bg-gray-700 text-sm"
-                    >
+                    <button onClick={() => handleRequestStage(true)} className="w-full text-left px-4 py-3 text-white hover:bg-gray-700 text-sm">
                       📹 Con cámara y audio
                     </button>
-                    <button
-                      onClick={() => handleRequestStage(false)}
-                      className="w-full text-left px-4 py-3 text-white hover:bg-gray-700 text-sm border-t border-gray-700"
-                    >
+                    <button onClick={() => handleRequestStage(false)} className="w-full text-left px-4 py-3 text-white hover:bg-gray-700 text-sm border-t border-gray-700">
                       🎤 Solo audio
                     </button>
                   </div>
@@ -94,19 +99,13 @@ export function SpectatorView({ broadcastId }: { broadcastId: string }) {
               </div>
             )}
             {stageStatus === 'requested' && (
-              <div className="w-full bg-yellow-600 text-white py-3 rounded text-center text-sm font-bold">
-                ⏳ Esperando aprobación...
-              </div>
+              <div className="w-full bg-yellow-600 text-white py-3 rounded text-center text-sm font-bold">⏳ Esperando aprobación...</div>
             )}
             {stageStatus === 'approved' && (
-              <div className="w-full bg-green-600 text-white py-3 rounded text-center text-sm font-bold">
-                ✅ ¡Estás en escenario!
-              </div>
+              <div className="w-full bg-green-600 text-white py-3 rounded text-center text-sm font-bold">✅ ¡Estás en escenario!</div>
             )}
             {stageStatus === 'rejected' && (
-              <div className="w-full bg-red-600 text-white py-3 rounded text-center text-sm font-bold">
-                ❌ Solicitud rechazada
-              </div>
+              <div className="w-full bg-red-600 text-white py-3 rounded text-center text-sm font-bold">❌ Solicitud rechazada</div>
             )}
           </div>
         </div>
@@ -116,9 +115,7 @@ export function SpectatorView({ broadcastId }: { broadcastId: string }) {
         </div>
 
         <Link href="/">
-          <button className="w-full bg-gray-600 hover:bg-gray-700 text-white py-3 rounded font-bold">
-            ⬅️ Volver
-          </button>
+          <button className="w-full bg-gray-600 hover:bg-gray-700 text-white py-3 rounded font-bold">⬅️ Volver</button>
         </Link>
       </div>
     </div>
