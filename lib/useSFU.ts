@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 
-const WORKER_URL = 'https://lta-webrtc.pendziuch.workers.dev';
 const SFU_BASE = 'https://rtc.live.cloudflare.com/v1/apps/d4846f45ddaf81d8900ac815bb1aa2b4';
 const SFU_SECRET = 'e8e330bcc823d3d8636f28bfbd7d1ae23d8b476f1095f300d76c63b1c35384ed';
+const WS_BASE = 'wss://lta-webrtc.pendziuch.workers.dev';
 
 async function sfu(path: string, body?: any, method = 'POST') {
   const res = await fetch(`${SFU_BASE}${path}`, {
@@ -31,39 +31,33 @@ export function useSFUBroadcaster(broadcastId: string) {
 
     async function start() {
       try {
-        // 1. Cámara
         const localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         setStream(localStream);
 
-        // 2. PeerConnection con bundlePolicy max-bundle (requerido por Cloudflare)
         pc = new RTCPeerConnection({
           iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }],
           bundlePolicy: 'max-bundle',
         });
 
-        // 3. Agregar tracks como sendonly
         const transceivers = localStream.getTracks().map(track =>
           pc.addTransceiver(track, { direction: 'sendonly' })
         );
 
-        // 4. Crear sesión SFU con offer inicial
         await pc.setLocalDescription(await pc.createOffer());
         const sessionResult = await sfu('/sessions/new', {
           sessionDescription: { type: 'offer', sdp: pc.localDescription!.sdp }
         });
         await pc.setRemoteDescription(new RTCSessionDescription(sessionResult.sessionDescription));
 
-        // 5. Esperar ICE connected
         await new Promise<void>((resolve, reject) => {
           const t = setTimeout(() => reject(new Error('ICE timeout')), 15000);
           pc.addEventListener('iceconnectionstatechange', () => {
-            console.log('ICE state:', pc.iceConnectionState);
+            console.log('Broadcaster ICE:', pc.iceConnectionState);
             if (pc.iceConnectionState === 'connected') { clearTimeout(t); resolve(); }
             if (pc.iceConnectionState === 'failed') { clearTimeout(t); reject(new Error('ICE failed')); }
           });
         });
 
-        // 6. Publicar tracks
         await pc.setLocalDescription(await pc.createOffer());
         const trackObjects = transceivers.map(t => ({
           location: 'local',
@@ -81,8 +75,7 @@ export function useSFUBroadcaster(broadcastId: string) {
         setLive(true);
         console.log('✅ Broadcaster live, tracks:', trackNames);
 
-        // 7. WebSocket coordinación
-        ws = new WebSocket(`wss://lta-webrtc.pendziuch.workers.dev?broadcastId=${broadcastId}&role=broadcaster`);
+        ws = new WebSocket(`${WS_BASE}?broadcastId=${broadcastId}&role=broadcaster`);
         wsRef.current = ws;
 
         ws.onopen = () => {
@@ -132,7 +125,6 @@ export function useSFUSpectator(broadcastId: string) {
       try {
         console.log('🔌 Suscribiendo a tracks:', broadcasterInfo.trackNames);
 
-        // 1. PeerConnection
         pc = new RTCPeerConnection({
           iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }],
           bundlePolicy: 'max-bundle',
@@ -151,14 +143,12 @@ export function useSFUSpectator(broadcastId: string) {
           }
         };
 
-        // 2. Crear sesión SFU para el spectator con offer vacía
         await pc.setLocalDescription(await pc.createOffer());
         const session = await sfu('/sessions/new', {
           sessionDescription: { type: 'offer', sdp: pc.localDescription!.sdp }
         });
         await pc.setRemoteDescription(new RTCSessionDescription(session.sessionDescription));
 
-        // 3. Esperar ICE
         await new Promise<void>((resolve, reject) => {
           const t = setTimeout(() => reject(new Error('ICE timeout')), 15000);
           pc.addEventListener('iceconnectionstatechange', () => {
@@ -168,7 +158,6 @@ export function useSFUSpectator(broadcastId: string) {
           });
         });
 
-        // 4. Pedir tracks del broadcaster
         const pullResult = await sfu(`/sessions/${session.sessionId}/tracks/new`, {
           tracks: broadcasterInfo.trackNames.map(trackName => ({
             location: 'remote',
@@ -177,7 +166,7 @@ export function useSFUSpectator(broadcastId: string) {
           })),
         });
 
-        console.log('Pull result:', pullResult);
+        console.log('Pull result:', JSON.stringify(pullResult));
 
         if (pullResult.requiresImmediateRenegotiation) {
           await pc.setRemoteDescription(new RTCSessionDescription(pullResult.sessionDescription));
@@ -193,7 +182,7 @@ export function useSFUSpectator(broadcastId: string) {
       }
     }
 
-    const ws = new WebSocket(`wss://lta-webrtc.pendziuch.workers.dev?broadcastId=${broadcastId}&role=spectator`);
+    const ws = new WebSocket(`${WS_BASE}?broadcastId=${broadcastId}&role=spectator`);
     wsRef.current = ws;
 
     ws.onmessage = async (e) => {
