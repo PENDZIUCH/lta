@@ -50,19 +50,11 @@ export function useSFUBroadcaster(broadcastId: string) {
         const localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         setStream(localStream);
 
-        pc = new RTCPeerConnection({
-          iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }],
-          bundlePolicy: 'max-bundle',
-        });
-
-        const transceivers = localStream.getTracks().map(track =>
-          pc.addTransceiver(track, { direction: 'sendonly' })
-        );
+        pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }], bundlePolicy: 'max-bundle' });
+        const transceivers = localStream.getTracks().map(track => pc.addTransceiver(track, { direction: 'sendonly' }));
 
         await pc.setLocalDescription(await pc.createOffer());
-        const sessionResult = await sfu('/sessions/new', {
-          sessionDescription: { type: 'offer', sdp: pc.localDescription!.sdp }
-        });
+        const sessionResult = await sfu('/sessions/new', { sessionDescription: { type: 'offer', sdp: pc.localDescription!.sdp } });
         await pc.setRemoteDescription(new RTCSessionDescription(sessionResult.sessionDescription));
 
         await new Promise<void>((resolve, reject) => {
@@ -87,56 +79,31 @@ export function useSFUBroadcaster(broadcastId: string) {
         wsRef.current = ws;
 
         ws.onopen = () => {
-          ws.send(JSON.stringify({
-            type: 'broadcaster-info',
-            data: { sessionId: sessionResult.sessionId, trackNames }
-          }));
+          ws.send(JSON.stringify({ type: 'broadcaster-info', data: { sessionId: sessionResult.sessionId, trackNames } }));
         };
 
         ws.onmessage = async (e) => {
           const msg = JSON.parse(e.data);
-
           if (msg.type === 'viewer-count') setViewers(msg.count);
-
-          if (msg.type === 'chat') {
-            setMessages(prev => [...prev, { text: msg.text, from: msg.from }]);
-          }
-
+          if (msg.type === 'chat') setMessages(prev => [...prev, { text: msg.text, from: msg.from }]);
           if (msg.type === 'stage-request') {
-            setStageRequests(prev => [...prev, {
-              from: msg.from,
-              viewerNumber: Number(msg.viewerNumber),
-              withVideo: msg.withVideo,
-            }]);
+            setStageRequests(prev => [...prev, { from: msg.from, viewerNumber: Number(msg.viewerNumber), withVideo: msg.withVideo }]);
           }
-
-          // WebRTC p2p para el stage (broadcaster recibe offer del spectator)
           if (msg.type === 'stage-signal') {
             const viewerNumber = Number(msg.fromNumber);
             let stagePc = stagePeersRef.current.get(viewerNumber);
-
             if (!stagePc) {
               stagePc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }] });
               stagePeersRef.current.set(viewerNumber, stagePc);
-
               stagePc.ontrack = (e) => {
-                const stageStream = new MediaStream([e.track]);
-                setStageParticipants(prev => {
-                  const existing = prev.find(p => p.number === viewerNumber);
-                  if (existing) {
-                    return prev.map(p => p.number === viewerNumber ? { ...p, stream: stageStream } : p);
-                  }
-                  return [...prev, { name: msg.fromName, number: viewerNumber, stream: stageStream, withVideo: true }];
-                });
+                setStageParticipants(prev => prev.map(p =>
+                  p.number === viewerNumber ? { ...p, stream: new MediaStream([e.track]) } : p
+                ));
               };
-
               stagePc.onicecandidate = ({ candidate }) => {
-                if (candidate) {
-                  ws.send(JSON.stringify({ type: 'stage-signal', signal: { type: 'candidate', candidate }, toNumber: viewerNumber }));
-                }
+                if (candidate) ws.send(JSON.stringify({ type: 'stage-signal', signal: { type: 'candidate', candidate }, toNumber: viewerNumber }));
               };
             }
-
             if (msg.signal.type === 'offer') {
               await stagePc.setRemoteDescription(new RTCSessionDescription(msg.signal));
               const answer = await stagePc.createAnswer();
@@ -147,7 +114,6 @@ export function useSFUBroadcaster(broadcastId: string) {
             }
           }
         };
-
       } catch (err: any) {
         setError(err.message || String(err));
       }
@@ -165,13 +131,7 @@ export function useSFUBroadcaster(broadcastId: string) {
   const approveStage = useCallback((req: StageRequest) => {
     wsRef.current?.send(JSON.stringify({ type: 'stage-approved', viewerNumber: req.viewerNumber, withVideo: req.withVideo }));
     setStageRequests(prev => prev.filter(r => r.viewerNumber !== req.viewerNumber));
-    // Agregar placeholder mientras llega el stream
-    setStageParticipants(prev => [...prev, {
-      name: req.from,
-      number: req.viewerNumber,
-      stream: null,
-      withVideo: req.withVideo,
-    }]);
+    setStageParticipants(prev => [...prev, { name: req.from, number: req.viewerNumber, stream: null, withVideo: req.withVideo }]);
   }, []);
 
   const rejectStage = useCallback((viewerNumber: number) => {
@@ -206,11 +166,7 @@ export function useSFUSpectator(broadcastId: string) {
 
     async function subscribeToStream(broadcasterInfo: { sessionId: string; trackNames: string[] }) {
       try {
-        pc = new RTCPeerConnection({
-          iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }],
-          bundlePolicy: 'max-bundle',
-        });
-
+        pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }], bundlePolicy: 'max-bundle' });
         const mediaStream = new MediaStream();
         let tracksReceived = 0;
 
@@ -224,12 +180,9 @@ export function useSFUSpectator(broadcastId: string) {
         };
 
         const session = await sfu('/sessions/new');
-
         const pullResult = await sfu(`/sessions/${session.sessionId}/tracks/new`, {
           tracks: broadcasterInfo.trackNames.map(trackName => ({
-            location: 'remote',
-            sessionId: broadcasterInfo.sessionId,
-            trackName,
+            location: 'remote', sessionId: broadcasterInfo.sessionId, trackName,
           })),
         });
 
@@ -241,7 +194,6 @@ export function useSFUSpectator(broadcastId: string) {
             sessionDescription: { type: 'answer', sdp: answer.sdp }
           }, 'PUT');
         }
-
       } catch (err: any) {
         setError(err.message || String(err));
       }
@@ -252,31 +204,23 @@ export function useSFUSpectator(broadcastId: string) {
 
     ws.onmessage = async (e) => {
       const msg = JSON.parse(e.data);
-
-      if (msg.type === 'your-name') {
-        setMyName(msg.name);
-        setMyNumber(msg.number);
-      }
-
+      if (msg.type === 'your-name') { setMyName(msg.name); setMyNumber(msg.number); }
       if (msg.type === 'broadcaster-info') await subscribeToStream(msg.data);
       if (msg.type === 'broadcaster-left') { setConnected(false); setRemoteStream(null); }
-
+      if (msg.type === 'chat-history') {
+        setMessages(msg.messages.map((m: any) => ({ text: m.text, from: m.from })));
+      }
       if (msg.type === 'chat' && !msg.own) {
         setMessages(prev => [...prev, { text: msg.text, from: msg.from }]);
       }
-
       if (msg.type === 'stage-approved') {
         setStageStatus('approved');
-        // Iniciar WebRTC p2p con el broadcaster
         await startStageConnection(ws);
       }
-
       if (msg.type === 'stage-rejected') {
         setStageStatus('rejected');
         setTimeout(() => setStageStatus('idle'), 3000);
       }
-
-      // WebRTC signals del broadcaster
       if (msg.type === 'stage-signal' && stagePcRef.current) {
         if (msg.signal.type === 'answer') {
           await stagePcRef.current.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: msg.signal.sdp }));
@@ -293,21 +237,14 @@ export function useSFUSpectator(broadcastId: string) {
     try {
       const stagePc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }] });
       stagePcRef.current = stagePc;
-
-      // Pedir cámara/audio
       const localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       localStream.getTracks().forEach(track => stagePc.addTrack(track, localStream));
-
       stagePc.onicecandidate = ({ candidate }) => {
-        if (candidate) {
-          ws.send(JSON.stringify({ type: 'stage-signal', signal: { type: 'candidate', candidate } }));
-        }
+        if (candidate) ws.send(JSON.stringify({ type: 'stage-signal', signal: { type: 'candidate', candidate } }));
       };
-
       const offer = await stagePc.createOffer();
       await stagePc.setLocalDescription(offer);
       ws.send(JSON.stringify({ type: 'stage-signal', signal: { type: 'offer', sdp: offer.sdp } }));
-
     } catch (err: any) {
       setError(err.message);
     }
