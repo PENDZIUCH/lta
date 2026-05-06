@@ -1,19 +1,16 @@
 'use client';
 
-import { useWebRTC } from '@/lib/useWebRTC';
+import { useSFUBroadcaster } from '@/lib/useSFU';
 import { useRef, useEffect, useState } from 'react';
 import Link from 'next/link';
 
 export function BroadcasterView({ broadcastId }: { broadcastId: string }) {
-  const { stream, error, connected } = useWebRTC(broadcastId, true);
+  const { stream, live, viewers, error } = useSFUBroadcaster(broadcastId);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [origin, setOrigin] = useState('');
   const [copied, setCopied] = useState(false);
-  const [viewers, setViewers] = useState(0);
 
-  useEffect(() => {
-    setOrigin(window.location.origin);
-  }, []);
+  useEffect(() => { setOrigin(window.location.origin); }, []);
 
   useEffect(() => {
     if (stream && videoRef.current) {
@@ -21,17 +18,7 @@ export function BroadcasterView({ broadcastId }: { broadcastId: string }) {
     }
   }, [stream]);
 
-  // Contar espectadores
-  useEffect(() => {
-    if (connected) {
-      setViewers(v => v + 1);
-    } else {
-      setViewers(v => Math.max(0, v - 1));
-    }
-  }, [connected]);
-
   const watchUrl = `${origin}/watch/${broadcastId}`;
-  const isLive = !!stream;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(watchUrl);
@@ -48,9 +35,7 @@ export function BroadcasterView({ broadcastId }: { broadcastId: string }) {
       <div className="max-w-2xl w-full">
         <h1 className="text-3xl font-bold text-white mb-4">🎥 Transmitiendo en Vivo</h1>
 
-        {error && (
-          <div className="bg-red-500 text-white p-4 rounded mb-4">Error: {error}</div>
-        )}
+        {error && <div className="bg-red-500 text-white p-4 rounded mb-4">Error: {error}</div>}
 
         <div className="bg-gray-900 rounded-lg overflow-hidden mb-4">
           <video ref={videoRef} autoPlay muted playsInline className="w-full h-auto bg-black" />
@@ -59,7 +44,7 @@ export function BroadcasterView({ broadcastId }: { broadcastId: string }) {
         <div className="flex gap-4 mb-4">
           <div className="flex-1 bg-gray-800 p-4 rounded text-white">
             <p className="text-sm text-gray-400">Estado</p>
-            <p className="text-xl font-bold">{isLive ? '🔴 En vivo' : '⏳ Iniciando...'}</p>
+            <p className="text-xl font-bold">{live ? '🔴 En vivo' : '⏳ Iniciando...'}</p>
           </div>
           <div className="flex-1 bg-gray-800 p-4 rounded text-white">
             <p className="text-sm text-gray-400">Espectadores</p>
@@ -68,19 +53,13 @@ export function BroadcasterView({ broadcastId }: { broadcastId: string }) {
         </div>
 
         <div className="bg-blue-600 p-4 rounded mb-4 text-white">
-          <p className="text-sm mb-2">Compartí este link con amigos:</p>
+          <p className="text-sm mb-2">Compartí este link:</p>
           <p className="bg-blue-800 p-2 rounded text-xs break-all mb-3">{watchUrl}</p>
           <div className="flex gap-2">
-            <button
-              onClick={handleCopy}
-              className="flex-1 bg-white text-blue-700 font-bold py-2 px-4 rounded hover:bg-gray-100 text-sm"
-            >
+            <button onClick={handleCopy} className="flex-1 bg-white text-blue-700 font-bold py-2 px-4 rounded text-sm">
               {copied ? '✅ Copiado!' : '📋 Copiar'}
             </button>
-            <button
-              onClick={handleWhatsApp}
-              className="flex-1 bg-green-500 text-white font-bold py-2 px-4 rounded hover:bg-green-600 text-sm"
-            >
+            <button onClick={handleWhatsApp} className="flex-1 bg-green-500 text-white font-bold py-2 px-4 rounded text-sm">
               📲 Compartir
             </button>
           </div>
