@@ -7,7 +7,7 @@ import { Chat } from './Chat';
 import { ParticipantsColumn } from './ParticipantsColumn';
 
 export function SpectatorView({ broadcastId }: { broadcastId: string }) {
-  const { remoteStream, localStream, connected, messages, myName, participants, error, sendMessage, toggleMic, toggleCamera, micOn, cameraOn } = useSFUSpectator(broadcastId);
+  const { remoteStream, localStream, connected, messages, myName, participants, micOn, cameraOn, error, sendMessage, toggleMic, toggleCamera } = useSFUSpectator(broadcastId);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [muted, setMuted] = useState(true);
 
@@ -31,66 +31,120 @@ export function SpectatorView({ broadcastId }: { broadcastId: string }) {
   }, [muted]);
 
   return (
-    <div className="flex flex-col min-h-screen bg-black p-4">
-      <div className="max-w-5xl w-full mx-auto">
-        <div className="flex items-center justify-between mb-4">
-          <h1 className="text-2xl font-bold text-white">📺 Viendo en Vivo</h1>
+    <div className="flex flex-col min-h-screen bg-black p-3">
+      <div className="w-full max-w-5xl mx-auto">
+
+        {/* Header */}
+        <div className="flex items-center justify-between mb-3">
+          <h1 className="text-xl font-bold text-white">📺 En Vivo</h1>
           <span className="text-gray-400 text-sm">{myName}</span>
         </div>
 
-        {error && <div className="bg-red-500 text-white p-3 rounded mb-4 text-sm">Error: {error}</div>}
+        {error && <div className="bg-red-500 text-white p-3 rounded mb-3 text-sm">Error: {error}</div>}
 
-        <div className="flex gap-4">
+        {/* Layout: desktop = lado a lado, mobile = apilado */}
+        <div className="flex flex-col lg:flex-row gap-3">
+
+          {/* Columna principal */}
           <div className="flex-1 min-w-0">
-            <div className="bg-gray-900 rounded-lg overflow-hidden mb-4 relative">
-              <video ref={videoRef} autoPlay muted playsInline className="w-full h-auto bg-black"
-                style={{ display: remoteStream ? 'block' : 'none' }} />
+
+            {/* Video principal */}
+            <div className="bg-gray-900 rounded-lg overflow-hidden mb-3 relative">
+              <video
+                ref={videoRef}
+                autoPlay muted playsInline
+                className="w-full bg-black"
+                style={{ display: remoteStream ? 'block' : 'none', maxHeight: '60vh' }}
+              />
               {remoteStream && muted && (
-                <div onClick={() => { if (videoRef.current) { videoRef.current.muted = false; setMuted(false); } }}
-                  className="absolute bottom-2 right-2 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded cursor-pointer">
-                  🔇 Tocá para activar audio
+                <div
+                  onClick={() => { if (videoRef.current) { videoRef.current.muted = false; setMuted(false); } }}
+                  className="absolute bottom-2 right-2 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded cursor-pointer"
+                >
+                  🔇 Tocá para audio
                 </div>
               )}
               {!remoteStream && (
-                <div className="w-full aspect-video bg-gray-800 flex items-center justify-center text-white">
-                  {connected ? '⏳ Cargando stream...' : '🔄 Conectando...'}
+                <div className="w-full aspect-video bg-gray-800 flex items-center justify-center text-white text-sm">
+                  {connected ? '⏳ Cargando...' : '🔄 Conectando...'}
                 </div>
               )}
             </div>
 
-            {/* Controles propios */}
-            <div className="flex gap-2 mb-4">
-              <button
-                onClick={toggleMic}
-                className={`flex-1 py-2 rounded font-bold text-sm ${micOn ? 'bg-gray-700 text-white' : 'bg-red-700 text-white'}`}
-              >
-                {micOn ? '🎤 Mic activo' : '🔇 Mic muteado'}
+            {/* Controles */}
+            <div className="flex gap-2 mb-3">
+              <button onClick={toggleMic}
+                className={`flex-1 py-2 rounded font-bold text-sm ${micOn ? 'bg-gray-700 text-white' : 'bg-red-700 text-white'}`}>
+                {micOn ? '🎤 Mic' : '🔇 Muteado'}
               </button>
-              <button
-                onClick={toggleCamera}
-                className={`flex-1 py-2 rounded font-bold text-sm ${cameraOn ? 'bg-gray-700 text-white' : 'bg-red-700 text-white'}`}
-              >
-                {cameraOn ? '📹 Cámara activa' : '📵 Cámara apagada'}
+              <button onClick={toggleCamera}
+                className={`flex-1 py-2 rounded font-bold text-sm ${cameraOn ? 'bg-gray-700 text-white' : 'bg-red-700 text-white'}`}>
+                {cameraOn ? '📹 Cámara' : '📵 Sin cámara'}
               </button>
+              <div className={`flex-1 py-2 rounded text-center text-sm font-bold ${connected ? 'bg-green-800 text-green-300' : 'bg-gray-800 text-gray-400'}`}>
+                {connected ? '✅ Online' : '⏳ ...'}
+              </div>
             </div>
 
-            <div className="bg-gray-800 p-3 rounded text-white mb-4">
-              <p className="text-xs text-gray-400">Estado</p>
-              <p className="font-bold">{connected ? '✅ Conectado' : '⏳ Conectando...'}</p>
-            </div>
+            {/* Participantes en mobile - fila horizontal */}
+            {(participants.length > 0 || localStream) && (
+              <div className="lg:hidden mb-3">
+                <p className="text-gray-400 text-xs font-bold mb-2 uppercase">👥 En vivo</p>
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {localStream && (
+                    <div className="flex-shrink-0 w-28">
+                      <MiniParticipant stream={localStream} name="Vos" isLocal={true} />
+                    </div>
+                  )}
+                  {participants.map(p => (
+                    <div key={p.number} className="flex-shrink-0 w-28">
+                      <MiniParticipant stream={p.stream} name={p.name} isLocal={false} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
-            <div className="mb-4">
+            {/* Chat */}
+            <div className="mb-3">
               <Chat messages={messages} onSend={sendMessage} myName="Yo" />
             </div>
 
             <Link href="/">
-              <button className="w-full bg-gray-600 hover:bg-gray-700 text-white py-3 rounded font-bold">⬅️ Volver</button>
+              <button className="w-full bg-gray-600 hover:bg-gray-700 text-white py-3 rounded font-bold">
+                ⬅️ Volver
+              </button>
             </Link>
           </div>
 
-          <ParticipantsColumn participants={participants} localStream={localStream} localName={myName} />
+          {/* Columna lateral - solo desktop */}
+          <div className="hidden lg:block">
+            <ParticipantsColumn participants={participants} localStream={localStream} localName={myName} />
+          </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function MiniParticipant({ stream, name, isLocal }: { stream?: MediaStream | null; name: string; isLocal: boolean }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (stream && videoRef.current) {
+      videoRef.current.srcObject = stream;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [stream]);
+
+  return (
+    <div className="bg-gray-800 rounded overflow-hidden">
+      {stream ? (
+        <video ref={videoRef} autoPlay playsInline muted={isLocal} className="w-full h-20 object-cover bg-black" />
+      ) : (
+        <div className="w-full h-16 bg-gray-700 flex items-center justify-center text-2xl">📷</div>
+      )}
+      <p className="text-white text-xs text-center py-1 truncate px-1">{name}</p>
     </div>
   );
 }
