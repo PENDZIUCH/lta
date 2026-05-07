@@ -136,9 +136,12 @@ export function useSFUSpectator(broadcastId: string) {
   const [messages, setMessages] = useState<{ text: string; from: string }[]>([]);
   const [myName, setMyName] = useState('Espectador');
   const [participants, setParticipants] = useState<Participant[]>([]);
+  const [micOn, setMicOn] = useState(true);
+  const [cameraOn, setCameraOn] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const myNumberRef = useRef<string>('0');
+  const localStreamRef = useRef<MediaStream | null>(null);
   const pcsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
 
   useEffect(() => {
@@ -174,6 +177,7 @@ export function useSFUSpectator(broadcastId: string) {
       try {
         const camStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         setLocalStream(camStream);
+        localStreamRef.current = camStream;
         const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }], bundlePolicy: 'max-bundle' });
         const transceivers = camStream.getTracks().map(track => pc.addTransceiver(track, { direction: 'sendonly' }));
         await pc.setLocalDescription(await pc.createOffer());
@@ -223,6 +227,7 @@ export function useSFUSpectator(broadcastId: string) {
       ws.close();
       mainPc?.close();
       pcsRef.current.forEach(p => p.close());
+      localStreamRef.current?.getTracks().forEach(t => t.stop());
     };
   }, [broadcastId]);
 
@@ -231,5 +236,25 @@ export function useSFUSpectator(broadcastId: string) {
     setMessages(prev => [...prev, { text, from: 'Yo' }]);
   }, []);
 
-  return { remoteStream, localStream, connected, messages, myName, participants, error, sendMessage };
+  const toggleMic = useCallback(() => {
+    const stream = localStreamRef.current;
+    if (!stream) return;
+    const audioTrack = stream.getAudioTracks()[0];
+    if (audioTrack) {
+      audioTrack.enabled = !audioTrack.enabled;
+      setMicOn(audioTrack.enabled);
+    }
+  }, []);
+
+  const toggleCamera = useCallback(() => {
+    const stream = localStreamRef.current;
+    if (!stream) return;
+    const videoTrack = stream.getVideoTracks()[0];
+    if (videoTrack) {
+      videoTrack.enabled = !videoTrack.enabled;
+      setCameraOn(videoTrack.enabled);
+    }
+  }, []);
+
+  return { remoteStream, localStream, connected, messages, myName, participants, micOn, cameraOn, error, sendMessage, toggleMic, toggleCamera };
 }

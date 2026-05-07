@@ -7,7 +7,7 @@ import { Chat } from './Chat';
 import { ParticipantsColumn } from './ParticipantsColumn';
 
 export function SpectatorView({ broadcastId }: { broadcastId: string }) {
-  const { remoteStream, localStream, connected, messages, myName, participants, error, sendMessage } = useSFUSpectator(broadcastId);
+  const { remoteStream, localStream, connected, messages, myName, participants, error, sendMessage, toggleMic, toggleCamera, micOn, cameraOn } = useSFUSpectator(broadcastId);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [muted, setMuted] = useState(true);
 
@@ -41,20 +41,13 @@ export function SpectatorView({ broadcastId }: { broadcastId: string }) {
         {error && <div className="bg-red-500 text-white p-3 rounded mb-4 text-sm">Error: {error}</div>}
 
         <div className="flex gap-4">
-          {/* Main */}
           <div className="flex-1 min-w-0">
             <div className="bg-gray-900 rounded-lg overflow-hidden mb-4 relative">
-              <video
-                ref={videoRef}
-                autoPlay muted playsInline
-                className="w-full h-auto bg-black"
-                style={{ display: remoteStream ? 'block' : 'none' }}
-              />
+              <video ref={videoRef} autoPlay muted playsInline className="w-full h-auto bg-black"
+                style={{ display: remoteStream ? 'block' : 'none' }} />
               {remoteStream && muted && (
-                <div
-                  onClick={() => { if (videoRef.current) { videoRef.current.muted = false; setMuted(false); } }}
-                  className="absolute bottom-2 right-2 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded cursor-pointer"
-                >
+                <div onClick={() => { if (videoRef.current) { videoRef.current.muted = false; setMuted(false); } }}
+                  className="absolute bottom-2 right-2 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded cursor-pointer">
                   🔇 Tocá para activar audio
                 </div>
               )}
@@ -63,6 +56,22 @@ export function SpectatorView({ broadcastId }: { broadcastId: string }) {
                   {connected ? '⏳ Cargando stream...' : '🔄 Conectando...'}
                 </div>
               )}
+            </div>
+
+            {/* Controles propios */}
+            <div className="flex gap-2 mb-4">
+              <button
+                onClick={toggleMic}
+                className={`flex-1 py-2 rounded font-bold text-sm ${micOn ? 'bg-gray-700 text-white' : 'bg-red-700 text-white'}`}
+              >
+                {micOn ? '🎤 Mic activo' : '🔇 Mic muteado'}
+              </button>
+              <button
+                onClick={toggleCamera}
+                className={`flex-1 py-2 rounded font-bold text-sm ${cameraOn ? 'bg-gray-700 text-white' : 'bg-red-700 text-white'}`}
+              >
+                {cameraOn ? '📹 Cámara activa' : '📵 Cámara apagada'}
+              </button>
             </div>
 
             <div className="bg-gray-800 p-3 rounded text-white mb-4">
@@ -75,18 +84,11 @@ export function SpectatorView({ broadcastId }: { broadcastId: string }) {
             </div>
 
             <Link href="/">
-              <button className="w-full bg-gray-600 hover:bg-gray-700 text-white py-3 rounded font-bold">
-                ⬅️ Volver
-              </button>
+              <button className="w-full bg-gray-600 hover:bg-gray-700 text-white py-3 rounded font-bold">⬅️ Volver</button>
             </Link>
           </div>
 
-          {/* Columna - tu cámara + otros participantes */}
-          <ParticipantsColumn
-            participants={participants}
-            localStream={localStream}
-            localName={myName}
-          />
+          <ParticipantsColumn participants={participants} localStream={localStream} localName={myName} />
         </div>
       </div>
     </div>
