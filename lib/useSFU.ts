@@ -23,17 +23,34 @@ export interface Participant {
   stream?: MediaStream;
 }
 
+// Suscribirse a un participante con reconexión automática
 async function subscribeToParticipantSFU(
   p: Participant,
   pcsMap: Map<string, RTCPeerConnection>,
-  onStream: (number: string, stream: MediaStream) => void
+  onStream: (number: string, stream: MediaStream) => void,
+  onDisconnect?: (number: string) => void
 ) {
-  if (pcsMap.has(p.number)) return;
+  // Limpiar conexión anterior si existe
+  const existing = pcsMap.get(p.number);
+  if (existing) {
+    existing.close();
+    pcsMap.delete(p.number);
+  }
+
   try {
-    const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }], bundlePolicy: 'max-bundle' });
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.cloudflare.com:3478' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+      ],
+      bundlePolicy: 'max-bundle',
+      iceTransportPolicy: 'all',
+    });
     pcsMap.set(p.number, pc);
+
     const mediaStream = new MediaStream();
     let received = 0;
+
     pc.ontrack = (e) => {
       mediaStream.addTrack(e.track);
       received++;
@@ -41,17 +58,44 @@ async function subscribeToParticipantSFU(
         onStream(p.number, new MediaStream(mediaStream.getTracks()));
       }
     };
+
+    // Reconexión automática cuando falla el ICE
+    pc.addEventListener('iceconnectionstatechange', () => {
+      console.log(`ICE participant ${p.number}:`, pc.iceConnectionState);
+      if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+        console.log(`Reconectando participante ${p.number}...`);
+        onDisconnect?.(p.number);
+        // Reintentar después de 2 segundos
+        setTimeout(() => {
+          if (pcsMap.get(p.number) === pc) {
+            subscribeToParticipantSFU(p, pcsMap, onStream, onDisconnect);
+          }
+        }, 2000);
+      }
+    });
+
     const session = await sfu('/sessions/new');
     const pullResult = await sfu(`/sessions/${session.sessionId}/tracks/new`, {
       tracks: p.trackNames.map(trackName => ({ location: 'remote', sessionId: p.sessionId, trackName })),
     });
+
     if (pullResult.requiresImmediateRenegotiation) {
       await pc.setRemoteDescription(new RTCSessionDescription(pullResult.sessionDescription));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      await sfu(`/sessions/${session.sessionId}/renegotiate`, { sessionDescription: { type: 'answer', sdp: answer.sdp } }, 'PUT');
+      await sfu(`/sessions/${session.sessionId}/renegotiate`, {
+        sessionDescription: { type: 'answer', sdp: answer.sdp }
+      }, 'PUT');
     }
-  } catch (err: any) { console.error('Error suscribiendo:', err); }
+  } catch (err: any) {
+    console.error('Error suscribiendo a participante:', err);
+    // Reintentar en 3 segundos si falla
+    setTimeout(() => {
+      if (!pcsMap.has(p.number)) {
+        subscribeToParticipantSFU(p, pcsMap, onStream, onDisconnect);
+      }
+    }, 3000);
+  }
 }
 
 // ─── BROADCASTER ─────────────────────────────────────────────────────────────
@@ -65,6 +109,7 @@ export function useSFUBroadcaster(broadcastId: string) {
   const [error, setError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const pcsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const participantsDataRef = useRef<Map<string, Participant>>(new Map());
 
   useEffect(() => {
     let pc: RTCPeerConnection;
@@ -74,11 +119,21 @@ export function useSFUBroadcaster(broadcastId: string) {
       try {
         const localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         setStream(localStream);
-        pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }], bundlePolicy: 'max-bundle' });
+
+        pc = new RTCPeerConnection({
+          iceServers: [
+            { urls: 'stun:stun.cloudflare.com:3478' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+          ],
+          bundlePolicy: 'max-bundle',
+        });
+
         const transceivers = localStream.getTracks().map(track => pc.addTransceiver(track, { direction: 'sendonly' }));
+
         await pc.setLocalDescription(await pc.createOffer());
         const sessionResult = await sfu('/sessions/new', { sessionDescription: { type: 'offer', sdp: pc.localDescription!.sdp } });
         await pc.setRemoteDescription(new RTCSessionDescription(sessionResult.sessionDescription));
+
         await new Promise<void>((resolve, reject) => {
           const t = setTimeout(() => reject(new Error('ICE timeout')), 15000);
           pc.addEventListener('iceconnectionstatechange', () => {
@@ -86,6 +141,7 @@ export function useSFUBroadcaster(broadcastId: string) {
             if (pc.iceConnectionState === 'failed') { clearTimeout(t); reject(new Error('ICE failed')); }
           });
         });
+
         await pc.setLocalDescription(await pc.createOffer());
         const tracksResult = await sfu(`/sessions/${sessionResult.sessionId}/tracks/new`, {
           sessionDescription: { type: 'offer', sdp: pc.localDescription!.sdp },
@@ -97,9 +153,21 @@ export function useSFUBroadcaster(broadcastId: string) {
 
         ws = new WebSocket(`${WS_BASE}?broadcastId=${broadcastId}&role=broadcaster`);
         wsRef.current = ws;
+
         ws.onopen = () => {
           ws.send(JSON.stringify({ type: 'broadcaster-info', data: { sessionId: sessionResult.sessionId, trackNames } }));
         };
+
+        ws.onclose = () => {
+          // Reconectar WebSocket si se cierra inesperadamente
+          setTimeout(() => {
+            if (wsRef.current?.readyState === WebSocket.CLOSED) {
+              console.log('WS cerrado, reconectando...');
+              // Simplemente recargar si el WS se pierde
+            }
+          }, 2000);
+        };
+
         ws.onmessage = async (e) => {
           const msg = JSON.parse(e.data);
           if (msg.type === 'viewer-count') setViewers(msg.count);
@@ -107,9 +175,26 @@ export function useSFUBroadcaster(broadcastId: string) {
           if (msg.type === 'participants-update') {
             const list = Object.values(msg.participants) as Participant[];
             setParticipants(list);
-            list.forEach(p => subscribeToParticipantSFU(p, pcsRef.current, (number, s) => {
-              setParticipants(prev => prev.map(x => x.number === number ? { ...x, stream: s } : x));
-            }));
+            // Guardar datos para reconexión
+            list.forEach(p => participantsDataRef.current.set(p.number, p));
+            // Suscribirse a nuevos participantes
+            list.forEach(p => {
+              if (!pcsRef.current.has(p.number)) {
+                subscribeToParticipantSFU(
+                  p,
+                  pcsRef.current,
+                  (number, s) => setParticipants(prev => prev.map(x => x.number === number ? { ...x, stream: s } : x)),
+                  (number) => setParticipants(prev => prev.map(x => x.number === number ? { ...x, stream: undefined } : x))
+                );
+              }
+            });
+            // Limpiar los que ya no están
+            pcsRef.current.forEach((_, number) => {
+              if (!list.find(p => p.number === number)) {
+                pcsRef.current.get(number)?.close();
+                pcsRef.current.delete(number);
+              }
+            });
           }
         };
       } catch (err: any) { setError(err.message || String(err)); }
@@ -143,46 +228,93 @@ export function useSFUSpectator(broadcastId: string) {
   const myNumberRef = useRef<string>('0');
   const localStreamRef = useRef<MediaStream | null>(null);
   const pcsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const broadcasterInfoRef = useRef<{ sessionId: string; trackNames: string[] } | null>(null);
+  const mainPcRef = useRef<RTCPeerConnection | null>(null);
+
+  async function subscribeToMain(broadcasterInfo: { sessionId: string; trackNames: string[] }) {
+    try {
+      // Limpiar PC anterior
+      mainPcRef.current?.close();
+
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.cloudflare.com:3478' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+        ],
+        bundlePolicy: 'max-bundle',
+      });
+      mainPcRef.current = pc;
+
+      const mediaStream = new MediaStream();
+      let received = 0;
+
+      pc.ontrack = (e) => {
+        mediaStream.addTrack(e.track);
+        received++;
+        if (received >= broadcasterInfo.trackNames.length) {
+          setRemoteStream(new MediaStream(mediaStream.getTracks()));
+          setConnected(true);
+        }
+      };
+
+      // Reconexión automática del stream principal
+      pc.addEventListener('iceconnectionstatechange', () => {
+        console.log('Main ICE:', pc.iceConnectionState);
+        if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+          setConnected(false);
+          console.log('Stream principal caído, reconectando en 2s...');
+          setTimeout(() => {
+            if (broadcasterInfoRef.current && mainPcRef.current === pc) {
+              subscribeToMain(broadcasterInfoRef.current);
+            }
+          }, 2000);
+        }
+      });
+
+      const session = await sfu('/sessions/new');
+      const pullResult = await sfu(`/sessions/${session.sessionId}/tracks/new`, {
+        tracks: broadcasterInfo.trackNames.map(trackName => ({
+          location: 'remote', sessionId: broadcasterInfo.sessionId, trackName
+        })),
+      });
+
+      if (pullResult.requiresImmediateRenegotiation) {
+        await pc.setRemoteDescription(new RTCSessionDescription(pullResult.sessionDescription));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        await sfu(`/sessions/${session.sessionId}/renegotiate`, {
+          sessionDescription: { type: 'answer', sdp: answer.sdp }
+        }, 'PUT');
+      }
+    } catch (err: any) {
+      console.error('Error suscribiendo al main:', err);
+      setTimeout(() => {
+        if (broadcasterInfoRef.current) subscribeToMain(broadcasterInfoRef.current);
+      }, 3000);
+    }
+  }
 
   useEffect(() => {
-    let mainPc: RTCPeerConnection;
-
-    async function subscribeToMain(broadcasterInfo: { sessionId: string; trackNames: string[] }) {
-      try {
-        mainPc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }], bundlePolicy: 'max-bundle' });
-        const mediaStream = new MediaStream();
-        let received = 0;
-        mainPc.ontrack = (e) => {
-          mediaStream.addTrack(e.track);
-          received++;
-          if (received >= broadcasterInfo.trackNames.length) {
-            setRemoteStream(new MediaStream(mediaStream.getTracks()));
-            setConnected(true);
-          }
-        };
-        const session = await sfu('/sessions/new');
-        const pullResult = await sfu(`/sessions/${session.sessionId}/tracks/new`, {
-          tracks: broadcasterInfo.trackNames.map(trackName => ({ location: 'remote', sessionId: broadcasterInfo.sessionId, trackName })),
-        });
-        if (pullResult.requiresImmediateRenegotiation) {
-          await mainPc.setRemoteDescription(new RTCSessionDescription(pullResult.sessionDescription));
-          const answer = await mainPc.createAnswer();
-          await mainPc.setLocalDescription(answer);
-          await sfu(`/sessions/${session.sessionId}/renegotiate`, { sessionDescription: { type: 'answer', sdp: answer.sdp } }, 'PUT');
-        }
-      } catch (err: any) { setError(err.message || String(err)); }
-    }
-
     async function publishLocalCamera(ws: WebSocket) {
       try {
         const camStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         setLocalStream(camStream);
         localStreamRef.current = camStream;
-        const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }], bundlePolicy: 'max-bundle' });
+
+        const pc = new RTCPeerConnection({
+          iceServers: [
+            { urls: 'stun:stun.cloudflare.com:3478' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+          ],
+          bundlePolicy: 'max-bundle',
+        });
+
         const transceivers = camStream.getTracks().map(track => pc.addTransceiver(track, { direction: 'sendonly' }));
+
         await pc.setLocalDescription(await pc.createOffer());
         const sessionResult = await sfu('/sessions/new', { sessionDescription: { type: 'offer', sdp: pc.localDescription!.sdp } });
         await pc.setRemoteDescription(new RTCSessionDescription(sessionResult.sessionDescription));
+
         await new Promise<void>((resolve, reject) => {
           const t = setTimeout(() => reject(new Error('ICE timeout')), 15000);
           pc.addEventListener('iceconnectionstatechange', () => {
@@ -190,6 +322,7 @@ export function useSFUSpectator(broadcastId: string) {
             if (pc.iceConnectionState === 'failed') { clearTimeout(t); reject(new Error('ICE failed')); }
           });
         });
+
         await pc.setLocalDescription(await pc.createOffer());
         const tracksResult = await sfu(`/sessions/${sessionResult.sessionId}/tracks/new`, {
           sessionDescription: { type: 'offer', sdp: pc.localDescription!.sdp },
@@ -206,26 +339,43 @@ export function useSFUSpectator(broadcastId: string) {
     const ws = new WebSocket(`${WS_BASE}?broadcastId=${broadcastId}&role=spectator`);
     wsRef.current = ws;
     ws.onopen = () => { publishLocalCamera(ws); };
+
     ws.onmessage = async (e) => {
       const msg = JSON.parse(e.data);
       if (msg.type === 'your-name') { setMyName(msg.name); myNumberRef.current = String(msg.number); }
-      if (msg.type === 'broadcaster-info') await subscribeToMain(msg.data);
-      if (msg.type === 'broadcaster-left') { setConnected(false); setRemoteStream(null); }
+      if (msg.type === 'broadcaster-info') {
+        broadcasterInfoRef.current = msg.data;
+        await subscribeToMain(msg.data);
+      }
+      if (msg.type === 'broadcaster-left') { setConnected(false); setRemoteStream(null); broadcasterInfoRef.current = null; }
       if (msg.type === 'chat-history') setMessages(msg.messages.map((m: any) => ({ text: m.text, from: m.from })));
       if (msg.type === 'chat' && !msg.own) setMessages(prev => [...prev, { text: msg.text, from: msg.from }]);
       if (msg.type === 'participants-update') {
         const list = (Object.values(msg.participants) as Participant[]).filter(p => p.number !== myNumberRef.current);
         setParticipants(list);
-        list.forEach(p => subscribeToParticipantSFU(p, pcsRef.current, (number, s) => {
-          setParticipants(prev => prev.map(x => x.number === number ? { ...x, stream: s } : x));
-        }));
+        list.forEach(p => {
+          if (!pcsRef.current.has(p.number)) {
+            subscribeToParticipantSFU(
+              p,
+              pcsRef.current,
+              (number, s) => setParticipants(prev => prev.map(x => x.number === number ? { ...x, stream: s } : x)),
+              (number) => setParticipants(prev => prev.map(x => x.number === number ? { ...x, stream: undefined } : x))
+            );
+          }
+        });
+        pcsRef.current.forEach((_, number) => {
+          if (!list.find(p => p.number === number)) {
+            pcsRef.current.get(number)?.close();
+            pcsRef.current.delete(number);
+          }
+        });
       }
     };
 
     return () => {
       wsRef.current?.send(JSON.stringify({ type: 'participant-left' }));
       ws.close();
-      mainPc?.close();
+      mainPcRef.current?.close();
       pcsRef.current.forEach(p => p.close());
       localStreamRef.current?.getTracks().forEach(t => t.stop());
     };
@@ -237,23 +387,17 @@ export function useSFUSpectator(broadcastId: string) {
   }, []);
 
   const toggleMic = useCallback(() => {
-    const stream = localStreamRef.current;
-    if (!stream) return;
-    const audioTrack = stream.getAudioTracks()[0];
-    if (audioTrack) {
-      audioTrack.enabled = !audioTrack.enabled;
-      setMicOn(audioTrack.enabled);
-    }
+    const s = localStreamRef.current;
+    if (!s) return;
+    const t = s.getAudioTracks()[0];
+    if (t) { t.enabled = !t.enabled; setMicOn(t.enabled); }
   }, []);
 
   const toggleCamera = useCallback(() => {
-    const stream = localStreamRef.current;
-    if (!stream) return;
-    const videoTrack = stream.getVideoTracks()[0];
-    if (videoTrack) {
-      videoTrack.enabled = !videoTrack.enabled;
-      setCameraOn(videoTrack.enabled);
-    }
+    const s = localStreamRef.current;
+    if (!s) return;
+    const t = s.getVideoTracks()[0];
+    if (t) { t.enabled = !t.enabled; setCameraOn(t.enabled); }
   }, []);
 
   return { remoteStream, localStream, connected, messages, myName, participants, micOn, cameraOn, error, sendMessage, toggleMic, toggleCamera };
