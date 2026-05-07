@@ -9,7 +9,6 @@ import { ParticipantsColumn } from './ParticipantsColumn';
 export function SpectatorView({ broadcastId }: { broadcastId: string }) {
   const { remoteStream, localStream, connected, messages, myName, participants, error, sendMessage } = useSFUSpectator(broadcastId);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const localVideoRef = useRef<HTMLVideoElement>(null);
   const [muted, setMuted] = useState(true);
 
   useEffect(() => {
@@ -20,13 +19,6 @@ export function SpectatorView({ broadcastId }: { broadcastId: string }) {
     }
   }, [remoteStream]);
 
-  useEffect(() => {
-    if (localStream && localVideoRef.current) {
-      localVideoRef.current.srcObject = localStream;
-    }
-  }, [localStream]);
-
-  // Activar audio en el primer click
   useEffect(() => {
     const handleClick = () => {
       if (videoRef.current && muted) {
@@ -52,11 +44,17 @@ export function SpectatorView({ broadcastId }: { broadcastId: string }) {
           {/* Main */}
           <div className="flex-1 min-w-0">
             <div className="bg-gray-900 rounded-lg overflow-hidden mb-4 relative">
-              <video ref={videoRef} autoPlay muted playsInline className="w-full h-auto bg-black"
-                style={{ display: remoteStream ? 'block' : 'none' }} />
+              <video
+                ref={videoRef}
+                autoPlay muted playsInline
+                className="w-full h-auto bg-black"
+                style={{ display: remoteStream ? 'block' : 'none' }}
+              />
               {remoteStream && muted && (
-                <div onClick={() => { if (videoRef.current) { videoRef.current.muted = false; setMuted(false); } }}
-                  className="absolute bottom-2 right-2 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded cursor-pointer">
+                <div
+                  onClick={() => { if (videoRef.current) { videoRef.current.muted = false; setMuted(false); } }}
+                  className="absolute bottom-2 right-2 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded cursor-pointer"
+                >
                   🔇 Tocá para activar audio
                 </div>
               )}
@@ -66,14 +64,6 @@ export function SpectatorView({ broadcastId }: { broadcastId: string }) {
                 </div>
               )}
             </div>
-
-            {/* Preview cámara local */}
-            {localStream && (
-              <div className="bg-gray-900 rounded-lg overflow-hidden mb-4">
-                <p className="text-gray-400 text-xs px-3 pt-2">Tu cámara (los demás te ven)</p>
-                <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-32 object-cover" />
-              </div>
-            )}
 
             <div className="bg-gray-800 p-3 rounded text-white mb-4">
               <p className="text-xs text-gray-400">Estado</p>
@@ -91,8 +81,12 @@ export function SpectatorView({ broadcastId }: { broadcastId: string }) {
             </Link>
           </div>
 
-          {/* Columna participantes */}
-          <ParticipantsColumn participants={participants} />
+          {/* Columna - tu cámara + otros participantes */}
+          <ParticipantsColumn
+            participants={participants}
+            localStream={localStream}
+            localName={myName}
+          />
         </div>
       </div>
     </div>

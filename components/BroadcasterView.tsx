@@ -26,7 +26,6 @@ export function BroadcasterView({ broadcastId }: { broadcastId: string }) {
         {error && <div className="bg-red-500 text-white p-3 rounded mb-4 text-sm">Error: {error}</div>}
 
         <div className="flex gap-4">
-          {/* Main */}
           <div className="flex-1 min-w-0">
             <div className="bg-gray-900 rounded-lg overflow-hidden mb-4">
               <video ref={videoRef} autoPlay muted playsInline className="w-full h-auto bg-black" />
@@ -69,7 +68,6 @@ export function BroadcasterView({ broadcastId }: { broadcastId: string }) {
             </Link>
           </div>
 
-          {/* Columna participantes */}
           <ParticipantsColumn participants={participants} />
         </div>
       </div>
