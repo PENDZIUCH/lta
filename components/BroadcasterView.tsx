@@ -1,7 +1,7 @@
 'use client';
 
 import { useSFUBroadcaster } from '@/lib/useSFU';
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { Chat } from './Chat';
 import { ParticipantsColumn } from './ParticipantsColumn';
@@ -11,10 +11,24 @@ export function BroadcasterView({ broadcastId }: { broadcastId: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [origin, setOrigin] = useState('');
   const [copied, setCopied] = useState(false);
+  const [micOn, setMicOn] = useState(true);
+  const [cameraOn, setCameraOn] = useState(true);
 
   useEffect(() => { setOrigin(window.location.origin); }, []);
   useEffect(() => {
     if (stream && videoRef.current) videoRef.current.srcObject = stream;
+  }, [stream]);
+
+  const toggleMic = useCallback(() => {
+    if (!stream) return;
+    const track = stream.getAudioTracks()[0];
+    if (track) { track.enabled = !track.enabled; setMicOn(track.enabled); }
+  }, [stream]);
+
+  const toggleCamera = useCallback(() => {
+    if (!stream) return;
+    const track = stream.getVideoTracks()[0];
+    if (track) { track.enabled = !track.enabled; setCameraOn(track.enabled); }
   }, [stream]);
 
   const watchUrl = `${origin}/watch/${broadcastId}`;
@@ -27,11 +41,23 @@ export function BroadcasterView({ broadcastId }: { broadcastId: string }) {
 
         <div className="flex gap-4">
           <div className="flex-1 min-w-0">
-            <div className="bg-gray-900 rounded-lg overflow-hidden mb-4">
+            <div className="bg-gray-900 rounded-lg overflow-hidden mb-3">
               <video ref={videoRef} autoPlay muted playsInline className="w-full h-auto bg-black" />
             </div>
 
-            <div className="flex gap-3 mb-4">
+            {/* Controles broadcaster */}
+            <div className="flex gap-2 mb-3">
+              <button onClick={toggleMic}
+                className={`flex-1 py-2 rounded font-bold text-sm ${micOn ? 'bg-gray-700 text-white' : 'bg-red-700 text-white'}`}>
+                {micOn ? '🎤 Mic' : '🔇 Muteado'}
+              </button>
+              <button onClick={toggleCamera}
+                className={`flex-1 py-2 rounded font-bold text-sm ${cameraOn ? 'bg-gray-700 text-white' : 'bg-red-700 text-white'}`}>
+                {cameraOn ? '📹 Cámara' : '📵 Sin cámara'}
+              </button>
+            </div>
+
+            <div className="flex gap-3 mb-3">
               <div className="flex-1 bg-gray-800 p-3 rounded text-white">
                 <p className="text-xs text-gray-400">Estado</p>
                 <p className="font-bold">{live ? '🔴 En vivo' : '⏳ Iniciando...'}</p>
@@ -42,7 +68,7 @@ export function BroadcasterView({ broadcastId }: { broadcastId: string }) {
               </div>
             </div>
 
-            <div className="bg-blue-600 p-3 rounded mb-4 text-white">
+            <div className="bg-blue-600 p-3 rounded mb-3 text-white">
               <p className="text-xs mb-2">Compartí este link:</p>
               <p className="bg-blue-800 p-2 rounded text-xs break-all mb-2">{watchUrl}</p>
               <div className="flex gap-2">
