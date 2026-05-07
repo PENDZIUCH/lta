@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable react-hooks/exhaustive-deps */
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
@@ -203,7 +203,6 @@ export function useSFUSpectator(broadcastId: string) {
   async function subscribeToMain(broadcasterInfo: { sessionId: string; trackNames: string[] }) {
     try {
       mainPcRef.current?.close();
-
       const pc = new RTCPeerConnection({
         iceServers: [
           { urls: 'stun:stun.cloudflare.com:3478' },
