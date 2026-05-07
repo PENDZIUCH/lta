@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
@@ -23,19 +24,14 @@ export interface Participant {
   stream?: MediaStream;
 }
 
-// Suscribirse a un participante con reconexión automática
 async function subscribeToParticipantSFU(
   p: Participant,
   pcsMap: Map<string, RTCPeerConnection>,
   onStream: (number: string, stream: MediaStream) => void,
   onDisconnect?: (number: string) => void
 ) {
-  // Limpiar conexión anterior si existe
   const existing = pcsMap.get(p.number);
-  if (existing) {
-    existing.close();
-    pcsMap.delete(p.number);
-  }
+  if (existing) { existing.close(); pcsMap.delete(p.number); }
 
   try {
     const pc = new RTCPeerConnection({
@@ -44,7 +40,6 @@ async function subscribeToParticipantSFU(
         { urls: 'stun:stun1.l.google.com:19302' },
       ],
       bundlePolicy: 'max-bundle',
-      iceTransportPolicy: 'all',
     });
     pcsMap.set(p.number, pc);
 
@@ -59,13 +54,9 @@ async function subscribeToParticipantSFU(
       }
     };
 
-    // Reconexión automática cuando falla el ICE
     pc.addEventListener('iceconnectionstatechange', () => {
-      console.log(`ICE participant ${p.number}:`, pc.iceConnectionState);
       if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
-        console.log(`Reconectando participante ${p.number}...`);
         onDisconnect?.(p.number);
-        // Reintentar después de 2 segundos
         setTimeout(() => {
           if (pcsMap.get(p.number) === pc) {
             subscribeToParticipantSFU(p, pcsMap, onStream, onDisconnect);
@@ -83,17 +74,11 @@ async function subscribeToParticipantSFU(
       await pc.setRemoteDescription(new RTCSessionDescription(pullResult.sessionDescription));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      await sfu(`/sessions/${session.sessionId}/renegotiate`, {
-        sessionDescription: { type: 'answer', sdp: answer.sdp }
-      }, 'PUT');
+      await sfu(`/sessions/${session.sessionId}/renegotiate`, { sessionDescription: { type: 'answer', sdp: answer.sdp } }, 'PUT');
     }
-  } catch (err: any) {
-    console.error('Error suscribiendo a participante:', err);
-    // Reintentar en 3 segundos si falla
+  } catch {
     setTimeout(() => {
-      if (!pcsMap.has(p.number)) {
-        subscribeToParticipantSFU(p, pcsMap, onStream, onDisconnect);
-      }
+      if (!pcsMap.has(p.number)) subscribeToParticipantSFU(p, pcsMap, onStream, onDisconnect);
     }, 3000);
   }
 }
@@ -109,7 +94,6 @@ export function useSFUBroadcaster(broadcastId: string) {
   const [error, setError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const pcsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
-  const participantsDataRef = useRef<Map<string, Participant>>(new Map());
 
   useEffect(() => {
     let pc: RTCPeerConnection;
@@ -158,16 +142,6 @@ export function useSFUBroadcaster(broadcastId: string) {
           ws.send(JSON.stringify({ type: 'broadcaster-info', data: { sessionId: sessionResult.sessionId, trackNames } }));
         };
 
-        ws.onclose = () => {
-          // Reconectar WebSocket si se cierra inesperadamente
-          setTimeout(() => {
-            if (wsRef.current?.readyState === WebSocket.CLOSED) {
-              console.log('WS cerrado, reconectando...');
-              // Simplemente recargar si el WS se pierde
-            }
-          }, 2000);
-        };
-
         ws.onmessage = async (e) => {
           const msg = JSON.parse(e.data);
           if (msg.type === 'viewer-count') setViewers(msg.count);
@@ -175,20 +149,15 @@ export function useSFUBroadcaster(broadcastId: string) {
           if (msg.type === 'participants-update') {
             const list = Object.values(msg.participants) as Participant[];
             setParticipants(list);
-            // Guardar datos para reconexión
-            list.forEach(p => participantsDataRef.current.set(p.number, p));
-            // Suscribirse a nuevos participantes
             list.forEach(p => {
               if (!pcsRef.current.has(p.number)) {
                 subscribeToParticipantSFU(
-                  p,
-                  pcsRef.current,
+                  p, pcsRef.current,
                   (number, s) => setParticipants(prev => prev.map(x => x.number === number ? { ...x, stream: s } : x)),
                   (number) => setParticipants(prev => prev.map(x => x.number === number ? { ...x, stream: undefined } : x))
                 );
               }
             });
-            // Limpiar los que ya no están
             pcsRef.current.forEach((_, number) => {
               if (!list.find(p => p.number === number)) {
                 pcsRef.current.get(number)?.close();
@@ -223,7 +192,7 @@ export function useSFUSpectator(broadcastId: string) {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [micOn, setMicOn] = useState(true);
   const [cameraOn, setCameraOn] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const myNumberRef = useRef<string>('0');
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -233,7 +202,6 @@ export function useSFUSpectator(broadcastId: string) {
 
   async function subscribeToMain(broadcasterInfo: { sessionId: string; trackNames: string[] }) {
     try {
-      // Limpiar PC anterior
       mainPcRef.current?.close();
 
       const pc = new RTCPeerConnection({
@@ -257,12 +225,9 @@ export function useSFUSpectator(broadcastId: string) {
         }
       };
 
-      // Reconexión automática del stream principal
       pc.addEventListener('iceconnectionstatechange', () => {
-        console.log('Main ICE:', pc.iceConnectionState);
         if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
           setConnected(false);
-          console.log('Stream principal caído, reconectando en 2s...');
           setTimeout(() => {
             if (broadcasterInfoRef.current && mainPcRef.current === pc) {
               subscribeToMain(broadcasterInfoRef.current);
@@ -282,12 +247,9 @@ export function useSFUSpectator(broadcastId: string) {
         await pc.setRemoteDescription(new RTCSessionDescription(pullResult.sessionDescription));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        await sfu(`/sessions/${session.sessionId}/renegotiate`, {
-          sessionDescription: { type: 'answer', sdp: answer.sdp }
-        }, 'PUT');
+        await sfu(`/sessions/${session.sessionId}/renegotiate`, { sessionDescription: { type: 'answer', sdp: answer.sdp } }, 'PUT');
       }
-    } catch (err: any) {
-      console.error('Error suscribiendo al main:', err);
+    } catch {
       setTimeout(() => {
         if (broadcasterInfoRef.current) subscribeToMain(broadcasterInfoRef.current);
       }, 3000);
@@ -356,8 +318,7 @@ export function useSFUSpectator(broadcastId: string) {
         list.forEach(p => {
           if (!pcsRef.current.has(p.number)) {
             subscribeToParticipantSFU(
-              p,
-              pcsRef.current,
+              p, pcsRef.current,
               (number, s) => setParticipants(prev => prev.map(x => x.number === number ? { ...x, stream: s } : x)),
               (number) => setParticipants(prev => prev.map(x => x.number === number ? { ...x, stream: undefined } : x))
             );
