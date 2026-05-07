@@ -23,6 +23,37 @@ export interface Participant {
   stream?: MediaStream;
 }
 
+async function subscribeToParticipantSFU(
+  p: Participant,
+  pcsMap: Map<string, RTCPeerConnection>,
+  onStream: (number: string, stream: MediaStream) => void
+) {
+  if (pcsMap.has(p.number)) return;
+  try {
+    const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }], bundlePolicy: 'max-bundle' });
+    pcsMap.set(p.number, pc);
+    const mediaStream = new MediaStream();
+    let received = 0;
+    pc.ontrack = (e) => {
+      mediaStream.addTrack(e.track);
+      received++;
+      if (received >= p.trackNames.length) {
+        onStream(p.number, new MediaStream(mediaStream.getTracks()));
+      }
+    };
+    const session = await sfu('/sessions/new');
+    const pullResult = await sfu(`/sessions/${session.sessionId}/tracks/new`, {
+      tracks: p.trackNames.map(trackName => ({ location: 'remote', sessionId: p.sessionId, trackName })),
+    });
+    if (pullResult.requiresImmediateRenegotiation) {
+      await pc.setRemoteDescription(new RTCSessionDescription(pullResult.sessionDescription));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      await sfu(`/sessions/${session.sessionId}/renegotiate`, { sessionDescription: { type: 'answer', sdp: answer.sdp } }, 'PUT');
+    }
+  } catch (err: any) { console.error('Error suscribiendo:', err); }
+}
+
 // ─── BROADCASTER ─────────────────────────────────────────────────────────────
 
 export function useSFUBroadcaster(broadcastId: string) {
@@ -33,34 +64,7 @@ export function useSFUBroadcaster(broadcastId: string) {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [error, setError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  const participantPcsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
-
-  const subscribeToParticipant = useCallback(async (p: Participant) => {
-    if (participantPcsRef.current.has(p.number)) return;
-    try {
-      const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }], bundlePolicy: 'max-bundle' });
-      participantPcsRef.current.set(p.number, pc);
-      const mediaStream = new MediaStream();
-      let received = 0;
-      pc.ontrack = (e) => {
-        mediaStream.addTrack(e.track);
-        received++;
-        if (received >= p.trackNames.length) {
-          setParticipants(prev => prev.map(x => x.number === p.number ? { ...x, stream: new MediaStream(mediaStream.getTracks()) } : x));
-        }
-      };
-      const session = await sfu('/sessions/new');
-      const pullResult = await sfu(`/sessions/${session.sessionId}/tracks/new`, {
-        tracks: p.trackNames.map(trackName => ({ location: 'remote', sessionId: p.sessionId, trackName })),
-      });
-      if (pullResult.requiresImmediateRenegotiation) {
-        await pc.setRemoteDescription(new RTCSessionDescription(pullResult.sessionDescription));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        await sfu(`/sessions/${session.sessionId}/renegotiate`, { sessionDescription: { type: 'answer', sdp: answer.sdp } }, 'PUT');
-      }
-    } catch (err: any) { console.error('Error suscribiendo a participante:', err); }
-  }, []);
+  const pcsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
 
   useEffect(() => {
     let pc: RTCPeerConnection;
@@ -101,17 +105,19 @@ export function useSFUBroadcaster(broadcastId: string) {
           if (msg.type === 'viewer-count') setViewers(msg.count);
           if (msg.type === 'chat') setMessages(prev => [...prev, { text: msg.text, from: msg.from }]);
           if (msg.type === 'participants-update') {
-            const list: Participant[] = Object.values(msg.participants);
+            const list = Object.values(msg.participants) as Participant[];
             setParticipants(list);
-            list.forEach(p => subscribeToParticipant(p));
+            list.forEach(p => subscribeToParticipantSFU(p, pcsRef.current, (number, s) => {
+              setParticipants(prev => prev.map(x => x.number === number ? { ...x, stream: s } : x));
+            }));
           }
         };
       } catch (err: any) { setError(err.message || String(err)); }
     }
 
     start();
-    return () => { ws?.close(); pc?.close(); participantPcsRef.current.forEach(p => p.close()); };
-  }, [broadcastId, subscribeToParticipant]);
+    return () => { ws?.close(); pc?.close(); pcsRef.current.forEach(p => p.close()); };
+  }, [broadcastId]);
 
   const sendMessage = useCallback((text: string) => {
     wsRef.current?.send(JSON.stringify({ type: 'chat', text, from: 'Broadcaster' }));
@@ -133,34 +139,7 @@ export function useSFUSpectator(broadcastId: string) {
   const [error, setError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const myNumberRef = useRef<string>('0');
-  const participantPcsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
-
-  const subscribeToParticipant = useCallback(async (p: Participant) => {
-    if (participantPcsRef.current.has(p.number)) return;
-    try {
-      const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }], bundlePolicy: 'max-bundle' });
-      participantPcsRef.current.set(p.number, pc);
-      const mediaStream = new MediaStream();
-      let received = 0;
-      pc.ontrack = (e) => {
-        mediaStream.addTrack(e.track);
-        received++;
-        if (received >= p.trackNames.length) {
-          setParticipants(prev => prev.map(x => x.number === p.number ? { ...x, stream: new MediaStream(mediaStream.getTracks()) } : x));
-        }
-      };
-      const session = await sfu('/sessions/new');
-      const pullResult = await sfu(`/sessions/${session.sessionId}/tracks/new`, {
-        tracks: p.trackNames.map(trackName => ({ location: 'remote', sessionId: p.sessionId, trackName })),
-      });
-      if (pullResult.requiresImmediateRenegotiation) {
-        await pc.setRemoteDescription(new RTCSessionDescription(pullResult.sessionDescription));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        await sfu(`/sessions/${session.sessionId}/renegotiate`, { sessionDescription: { type: 'answer', sdp: answer.sdp } }, 'PUT');
-      }
-    } catch (err: any) { console.error('Error suscribiendo:', err); }
-  }, []);
+  const pcsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
 
   useEffect(() => {
     let mainPc: RTCPeerConnection;
@@ -222,9 +201,7 @@ export function useSFUSpectator(broadcastId: string) {
 
     const ws = new WebSocket(`${WS_BASE}?broadcastId=${broadcastId}&role=spectator`);
     wsRef.current = ws;
-
     ws.onopen = () => { publishLocalCamera(ws); };
-
     ws.onmessage = async (e) => {
       const msg = JSON.parse(e.data);
       if (msg.type === 'your-name') { setMyName(msg.name); myNumberRef.current = String(msg.number); }
@@ -233,19 +210,21 @@ export function useSFUSpectator(broadcastId: string) {
       if (msg.type === 'chat-history') setMessages(msg.messages.map((m: any) => ({ text: m.text, from: m.from })));
       if (msg.type === 'chat' && !msg.own) setMessages(prev => [...prev, { text: msg.text, from: msg.from }]);
       if (msg.type === 'participants-update') {
-        const list: Participant[] = Object.values(msg.participants).filter((p: any) => p.number !== myNumberRef.current);
+        const list = (Object.values(msg.participants) as Participant[]).filter(p => p.number !== myNumberRef.current);
         setParticipants(list);
-        list.forEach(p => subscribeToParticipant(p));
+        list.forEach(p => subscribeToParticipantSFU(p, pcsRef.current, (number, s) => {
+          setParticipants(prev => prev.map(x => x.number === number ? { ...x, stream: s } : x));
+        }));
       }
     };
 
     return () => {
-      ws.send(JSON.stringify({ type: 'participant-left' }));
+      wsRef.current?.send(JSON.stringify({ type: 'participant-left' }));
       ws.close();
       mainPc?.close();
-      participantPcsRef.current.forEach(p => p.close());
+      pcsRef.current.forEach(p => p.close());
     };
-  }, [broadcastId, subscribeToParticipant]);
+  }, [broadcastId]);
 
   const sendMessage = useCallback((text: string) => {
     wsRef.current?.send(JSON.stringify({ type: 'chat', text }));
